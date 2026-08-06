@@ -146,6 +146,17 @@ export default function ChantierApp() {
   // Picker dropdowns open state
   const [openPicker, setOpenPicker] = useState<string | null>(null)
 
+  // Ferme le picker au clic en dehors
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (!(e.target as Element).closest('.picker-wrap')) {
+        setOpenPicker(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   // ── Load / Seed ──────────────────────────────────────────────────────────────
   useEffect(() => {
     loadTasks()
@@ -311,7 +322,7 @@ export default function ChantierApp() {
 
   // ── Render ───────────────────────────────────────────────────────────────────
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#1C1F26', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B92A5', fontFamily: 'system-ui' }}>
+    <div style={{ minHeight: '100vh', background: '#F4F5F7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6275', fontFamily: 'system-ui' }}>
       Chargement…
     </div>
   )
@@ -577,7 +588,7 @@ function MultiPicker({ pickerId, options, selectedIds, onToggle, placeholder, op
   const filtered = options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
 
   return (
-    <div className="picker-wrap" onClick={e => e.stopPropagation()}>
+    <div className="picker-wrap">
       <div className={`picker-display${isOpen ? ' open' : ''}`} onClick={() => setOpenPicker(isOpen ? null : pickerId)}>
         {selected.length === 0
           ? <span className="placeholder">{placeholder}</span>
@@ -596,7 +607,7 @@ function MultiPicker({ pickerId, options, selectedIds, onToggle, placeholder, op
             {filtered.length === 0
               ? <div style={{ padding: '10px 12px', color: 'var(--text-dim)', fontSize: 12 }}>Aucune option</div>
               : filtered.map(o => (
-                <div key={o.id} className={`picker-option${selectedIds.includes(o.id) ? ' selected' : ''}`} onClick={() => onToggle(o.id)}>
+                <div key={o.id} className={`picker-option${selectedIds.includes(o.id) ? ' selected' : ''}`} onClick={e => { e.stopPropagation(); onToggle(o.id) }}>
                   <span className="opt-check">{selectedIds.includes(o.id) ? '✓' : ''}</span>
                   {o.label}
                 </div>
@@ -620,7 +631,7 @@ function AssigneePicker({ pickerId, options, selected, onToggle, placeholder, op
 }) {
   const isOpen = openPicker === pickerId
   return (
-    <div className="picker-wrap" onClick={e => e.stopPropagation()}>
+    <div className="picker-wrap">
       <div className={`picker-display${isOpen ? ' open' : ''}`} onClick={() => setOpenPicker(isOpen ? null : pickerId)}>
         {selected.length === 0
           ? <span className="placeholder">{placeholder}</span>
@@ -636,7 +647,7 @@ function AssigneePicker({ pickerId, options, selected, onToggle, placeholder, op
         <div className="picker-dropdown open">
           <div className="picker-options">
             {options.map(name => (
-              <div key={name} className={`picker-option${selected.includes(name) ? ' selected' : ''}`} onClick={() => onToggle(name)}>
+              <div key={name} className={`picker-option${selected.includes(name) ? ' selected' : ''}`} onClick={e => { e.stopPropagation(); onToggle(name) }}>
                 <span className="opt-check">{selected.includes(name) ? '✓' : ''}</span>
                 {name}
               </div>
@@ -685,20 +696,20 @@ function PurchasesList({ purchases, onChange }: { purchases: Purchase[]; onChang
 const CSS = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --bg: #1C1F26; --surface: #252930; --surface2: #2E333D; --border: #383E4A;
-    --accent: #F5C518; --accent-dim: rgba(245,197,24,0.12);
-    --green: #2ECC71; --green-dim: rgba(46,204,113,0.12);
-    --red: #E74C3C; --red-dim: rgba(231,76,60,0.14);
-    --orange: #F39C12; --orange-dim: rgba(243,156,18,0.13);
-    --blue: #4A9EFF; --blue-dim: rgba(74,158,255,0.12);
-    --text: #E8EAF0; --text-muted: #8B92A5; --text-dim: #5A6275;
+    --bg: #F4F5F7; --surface: #FFFFFF; --surface2: #F0F1F3; --border: #DDE1E9;
+    --accent: #E6A800; --accent-dim: rgba(230,168,0,0.12);
+    --green: #1A9E5A; --green-dim: rgba(26,158,90,0.12);
+    --red: #D63B2C; --red-dim: rgba(214,59,44,0.12);
+    --orange: #C97B0A; --orange-dim: rgba(201,123,10,0.12);
+    --blue: #2176D9; --blue-dim: rgba(33,118,217,0.12);
+    --text: #1A1D23; --text-muted: #5A6275; --text-dim: #9099AE;
     --radius: 8px;
-    --stripe: repeating-linear-gradient(-45deg,transparent,transparent 4px,rgba(231,76,60,0.07) 4px,rgba(231,76,60,0.07) 8px);
+    --stripe: repeating-linear-gradient(-45deg,transparent,transparent 4px,rgba(214,59,44,0.06) 4px,rgba(214,59,44,0.06) 8px);
   }
   body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 16px; line-height: 1.5; }
   header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 20px; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 16px; height: 56px; }
   .logo { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-  .logo-icon { width: 28px; height: 28px; background: var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; color: #1C1F26; }
+  .logo-icon { width: 28px; height: 28px; background: var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; color: #fff; }
   .header-stats { margin-left: auto; display: flex; gap: 16px; font-size: 14px; color: var(--text-muted); flex-shrink: 0; }
   .header-stat span { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
   .tabs-bar { background: var(--surface); border-bottom: 1px solid var(--border); display: flex; padding: 0 20px; gap: 4px; overflow-x: auto; scrollbar-width: none; }
@@ -714,7 +725,7 @@ const CSS = `
   .filter-btn { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-size: 14px; cursor: pointer; transition: all 0.15s; }
   .filter-btn:hover { border-color: var(--text-muted); color: var(--text); }
   .filter-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-  .btn-primary { padding: 8px 16px; background: var(--accent); color: #1C1F26; border: none; border-radius: var(--radius); font-size: 16px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; display: flex; align-items: center; gap: 6px; }
+  .btn-primary { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: 16px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; display: flex; align-items: center; gap: 6px; }
   .btn-primary:hover { opacity: 0.88; }
   .room { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   .room-header { padding: 14px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
@@ -766,7 +777,7 @@ const CSS = `
   .picker-option:hover { background: var(--border); }
   .picker-option.selected { color: var(--accent); }
   .opt-check { width: 14px; height: 14px; border-radius: 3px; border: 2px solid var(--border); flex-shrink: 0; display: grid; place-items: center; font-size: 9px; }
-  .picker-option.selected .opt-check { background: var(--accent); border-color: var(--accent); color: #1C1F26; font-weight: 900; }
+  .picker-option.selected .opt-check { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 900; }
   .purchase-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
   .purchase-name { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 8px 10px; font-size: 16px; font-family: inherit; outline: none; transition: border-color 0.15s; }
   .purchase-name:focus { border-color: var(--accent); }
