@@ -116,7 +116,7 @@ function makeSeedTasks(): Omit<Task, 'id'>[] {
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ChantierApp() {
   const [tasks, setTasks] = useState<Task[]>([])
-  const [apps, setApps] = useState<string[]>(['App 1', 'App 2', 'App 3'])
+  const [apps, setApps] = useState<string[]>(['App 1', 'App 2', 'App 3', 'Extérieur'])
   const [currentApp, setCurrentApp] = useState('App 1')
   const [activeFilter, setActiveFilter] = useState('all')
   const [loading, setLoading] = useState(true)
@@ -174,8 +174,8 @@ export default function ChantierApp() {
       if (inserted) setTasks(inserted as Task[])
     } else {
       setTasks(data as Task[])
-      const uniqueApps = [...new Set(data.map((t: Task) => t.app))]
-      if (uniqueApps.length) setApps(uniqueApps)
+      const uniqueApps = [...new Set([...['App 1', 'App 2', 'App 3', 'Extérieur'], ...data.map((t: Task) => t.app)])]
+      setApps(uniqueApps)
     }
     setLoading(false)
   }
