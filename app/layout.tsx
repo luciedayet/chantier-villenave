@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import UpdateBanner from '@/components/UpdateBanner'
 
 export const metadata: Metadata = {
   title: 'Chantier — Gestion travaux',
@@ -28,7 +29,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body style={{ margin: 0, padding: 0 }}>{children}</body>
+      <body style={{ margin: 0, padding: 0 }}>
+        <UpdateBanner />
+        {children}
+      </body>
     </html>
   )
 }
