@@ -11,7 +11,7 @@
     "next": "15.4.10",
     "react": "^18",
     "react-dom": "^18",
-    "@supabase/supabase-js": "2.44.4"
+    "@notionhq/client": "^2.2.15"
   },
   "engines": {
     "node": ">=20.9.0"
