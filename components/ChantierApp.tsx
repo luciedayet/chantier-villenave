@@ -296,7 +296,7 @@ export default function ChantierApp() {
               </button>
             ))}
           </div>
-          <button className="btn-primary" onClick={openAdd}>＋ Ajouter</button>
+          <button className="btn-primary" onClick={() => openAdd()}>＋ Ajouter</button>
         </div>
 
         <div id="roomsContainer">
