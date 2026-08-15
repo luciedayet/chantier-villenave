@@ -243,8 +243,8 @@ export default function ChantierApp() {
   const rooms = getRooms(currentApp)
   const allRoomOptions = [...new Set([...rooms, 'Chambre', 'Salon', 'Cuisine', 'Salle de bain', 'Entrée', 'Couloir'])]
   const allCatOptions = [...new Set([...getCats(addApp, addRoom), 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre'])]
-  const addTaskOptions = tasks.filter(t => t.app === addApp)
-  const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.id !== editTask.id) : []
+  const addTaskOptions = tasks.filter(t => t.app === addApp && t.room === addRoom)
+  const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editTask.room && t.id !== editTask.id) : []
 
   return (
     <>
@@ -351,13 +351,13 @@ export default function ChantierApp() {
             <div className="modal-title">Nouvelle tâche</div>
             <div className="field">
               <label>Appartement</label>
-              <select value={addApp} onChange={e => { setAddApp(e.target.value); setAddRoom(getRooms(e.target.value)[0] || 'Chambre') }}>
+              <select value={addApp} onChange={e => { setAddApp(e.target.value); setAddRoom(getRooms(e.target.value)[0] || 'Chambre'); setAddBlockedIds([]) }}>
                 {apps.map(a => <option key={a}>{a}</option>)}
               </select>
             </div>
             <div className="field">
               <label>Pièce</label>
-              <select value={addRoom} onChange={e => { setAddRoom(e.target.value); setAddCat(getCats(addApp, e.target.value)[0] || 'Autre') }}>
+              <select value={addRoom} onChange={e => { setAddRoom(e.target.value); setAddCat(getCats(addApp, e.target.value)[0] || 'Autre'); setAddBlockedIds([]) }}>
                 {allRoomOptions.map(r => <option key={r}>{r}</option>)}
               </select>
             </div>
