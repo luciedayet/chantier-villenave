@@ -207,10 +207,11 @@ export default function ChantierApp() {
   }
 
   // ── Open modals ──────────────────────────────────────────────────────────────
-  function openAdd() {
+  function openAdd(room?: string, cat?: string) {
+    const targetRoom = room || getRooms(currentApp)[0] || 'Chambre'
     setAddApp(currentApp)
-    setAddRoom(getRooms(currentApp)[0] || 'Chambre')
-    setAddCat(getCats(currentApp, getRooms(currentApp)[0] || 'Chambre')[0] || 'Autre')
+    setAddRoom(targetRoom)
+    setAddCat(cat || getCats(currentApp, targetRoom)[0] || 'Autre')
     setAddLabel('')
     setAddBlockedIds([])
     setAddAssignees([])
@@ -319,6 +320,7 @@ export default function ChantierApp() {
                     <div key={cat} className="category">
                       <div className="category-title">
                         <span className="cat-icon">{getCatIcon(cat)}</span>{cat}
+                        <button className="cat-add-btn" onClick={e => { e.stopPropagation(); openAdd(room, cat) }} title={`Ajouter une tâche · ${room} / ${cat}`}>＋</button>
                       </div>
                       {filtered.map(task => {
                         const blocked = isBlocked(task)
@@ -665,6 +667,8 @@ const CSS = `
   .category { margin-top: 12px; }
   .category-title { font-size: 12px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-dim); padding: 6px 0 4px; display: flex; align-items: center; gap: 8px; }
   .cat-icon { font-size: 14px; }
+  .cat-add-btn { margin-left: auto; width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--border); background: none; color: var(--text-dim); font-size: 13px; font-weight: 700; cursor: pointer; display: grid; place-items: center; flex-shrink: 0; transition: all 0.15s; }
+  .cat-add-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
   .task { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 6px; margin-top: 2px; transition: background 0.1s; position: relative; cursor: pointer; }
   .task:hover { background: var(--surface2); }
   .task.done { opacity: 0.45; }
