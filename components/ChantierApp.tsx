@@ -67,6 +67,14 @@ export default function ChantierApp() {
   // Picker dropdowns open state
   const [openPicker, setOpenPicker] = useState<string | null>(null)
 
+  // Sélection multiple (appui long) + blocage groupé
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  const [bulkBlockModal, setBulkBlockModal] = useState(false)
+  const [bulkBlockIds, setBulkBlockIds] = useState<string[]>([])
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressTriggered = useRef(false)
+
   // Ferme le picker au clic en dehors
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -228,6 +236,59 @@ export default function ChantierApp() {
     setEditModal(true)
   }
 
+  // ── Sélection multiple (appui long) ─────────────────────────────────────────
+  function startLongPress(id: string) {
+    longPressTriggered.current = false
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true
+      setSelectMode(true)
+      setSelectedTaskIds(prev => prev.includes(id) ? prev : [...prev, id])
+      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15)
+    }, 500)
+  }
+  function cancelLongPress() {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
+  }
+  function toggleTaskSelection(id: string) {
+    setSelectedTaskIds(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+      if (next.length === 0) setSelectMode(false)
+      return next
+    })
+  }
+  function handleTaskClick(task: Task) {
+    if (longPressTriggered.current) { longPressTriggered.current = false; return }
+    if (selectMode) { toggleTaskSelection(task.id); return }
+    openEdit(task)
+  }
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelectedTaskIds([])
+  }
+
+  function openBulkBlock() {
+    setBulkBlockIds([])
+    setBulkBlockModal(true)
+  }
+
+  async function applyBulkBlock() {
+    const targets = tasks.filter(t => selectedTaskIds.includes(t.id))
+    const updates = targets.map(t => ({
+      id: t.id,
+      blocked_by_ids: [...new Set([...(t.blocked_by_ids || []), ...bulkBlockIds])].filter(id => id !== t.id),
+    }))
+    for (const u of updates) {
+      await api(`/api/tasks/${u.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: u.blocked_by_ids }) })
+    }
+    setTasks(prev => prev.map(t => {
+      const u = updates.find(x => x.id === t.id)
+      return u ? { ...t, blocked_by_ids: u.blocked_by_ids } : t
+    }))
+    setBulkBlockModal(false)
+    exitSelectMode()
+    showToast(`✓ Dépendance ajoutée à ${updates.length} tâche${updates.length > 1 ? 's' : ''}`)
+  }
+
   // ── Stats ────────────────────────────────────────────────────────────────────
   const statDone = tasks.filter(t => t.done).length
   const statTotal = tasks.length
@@ -253,6 +314,9 @@ export default function ChantierApp() {
   const allCatOptions = [...new Set([...getCats(addApp, addRoom), 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre'])]
   const addTaskOptions = tasks.filter(t => t.app === addApp && t.room === addRoom)
   const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editTask.room && t.id !== editTask.id) : []
+  const selectedTasksList = tasks.filter(t => selectedTaskIds.includes(t.id))
+  const bulkCommonRoom = selectedTasksList.length > 0 && selectedTasksList.every(t => t.room === selectedTasksList[0].room) ? selectedTasksList[0].room : null
+  const bulkBlockOptions = tasks.filter(t => t.app === currentApp && (bulkCommonRoom ? t.room === bulkCommonRoom : true) && !selectedTaskIds.includes(t.id))
 
   return (
     <>
@@ -284,7 +348,7 @@ export default function ChantierApp() {
       </div>
 
       {/* Main */}
-      <main>
+      <main style={selectMode ? { paddingBottom: 76 } : undefined}>
         <div className="toolbar">
           <div className="toolbar-filters">
             <button className={`filter-btn${activeFilters.length === 0 ? ' active' : ''}`} onClick={() => setActiveFilters([])}>
@@ -327,9 +391,20 @@ export default function ChantierApp() {
                         const blockingLabels = getBlockingLabels(task)
                         const blockedPending = blockingLabels.filter(b => !b.done)
                         const blockedOk = blockingLabels.filter(b => b.done)
+                        const isSelected = selectedTaskIds.includes(task.id)
                         return (
-                          <div key={task.id} className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}`} onClick={() => openEdit(task)}>
-                            <button className="task-check" onClick={e => { e.stopPropagation(); toggleTask(task.id) }}>
+                          <div
+                            key={task.id}
+                            className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}`}
+                            onClick={() => handleTaskClick(task)}
+                            onMouseDown={() => startLongPress(task.id)}
+                            onMouseUp={cancelLongPress}
+                            onMouseLeave={cancelLongPress}
+                            onTouchStart={() => startLongPress(task.id)}
+                            onTouchEnd={cancelLongPress}
+                            onTouchMove={cancelLongPress}
+                          >
+                            <button className="task-check" onClick={e => { e.stopPropagation(); selectMode ? toggleTaskSelection(task.id) : toggleTask(task.id) }}>
                               <span className="checkmark">✓</span>
                             </button>
                             <div className="task-body">
@@ -355,6 +430,40 @@ export default function ChantierApp() {
           })}
         </div>
       </main>
+
+      {/* Barre de sélection multiple */}
+      {selectMode && (
+        <div className="selection-bar">
+          <span>{selectedTaskIds.length} tâche{selectedTaskIds.length > 1 ? 's' : ''} sélectionnée{selectedTaskIds.length > 1 ? 's' : ''}</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-ghost" onClick={exitSelectMode}>Annuler</button>
+          <button className="btn-primary" onClick={openBulkBlock}>🔒 Bloquer par…</button>
+        </div>
+      )}
+
+      {/* Modal Blocage groupé */}
+      {bulkBlockModal && (
+        <div className="modal-overlay open" onClick={e => { if (e.target === e.currentTarget) setBulkBlockModal(false) }}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Bloquer {selectedTaskIds.length} tâche{selectedTaskIds.length > 1 ? 's' : ''} par…</div>
+            <div className="modal-section" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+              <MultiPicker
+                pickerId="bulk-blocked"
+                options={bulkBlockOptions.map(t => ({ id: t.id, label: t.label }))}
+                selectedIds={bulkBlockIds}
+                onToggle={id => toggleBlockedId(id, setBulkBlockIds)}
+                placeholder="Choisir une ou plusieurs tâches bloquantes"
+                openPicker={openPicker}
+                setOpenPicker={setOpenPicker}
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setBulkBlockModal(false)}>Annuler</button>
+              <button className="btn-primary" onClick={applyBulkBlock} disabled={bulkBlockIds.length === 0}>Appliquer</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Add */}
       {addModal && (
@@ -651,6 +760,7 @@ const CSS = `
   .filter-btn:hover { border-color: var(--text-muted); color: var(--text); }
   .filter-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
   .btn-primary { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: 16px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; display: flex; align-items: center; gap: 6px; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-primary:hover { opacity: 0.88; }
   .room { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   .room-header { padding: 14px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
@@ -675,12 +785,15 @@ const CSS = `
   .task.done .task-label { text-decoration: line-through; color: var(--text-muted); }
   .task.blocked { background: var(--stripe); border: 1px solid rgba(231,76,60,0.2); }
   .task.blocked .task-label { color: var(--text-muted); }
+  .task.selected { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -1px; user-select: none; }
   .task-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); background: none; cursor: pointer; flex-shrink: 0; margin-top: 2px; display: grid; place-items: center; transition: all 0.15s; }
   .task-check:hover { border-color: var(--accent); background: var(--accent-dim); }
   .task.done .task-check { background: var(--green); border-color: var(--green); }
   .task.blocked .task-check { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+  .task.selected .task-check { background: var(--accent); border-color: var(--accent); opacity: 1; pointer-events: auto; cursor: pointer; }
   .checkmark { color: #fff; font-size: 10px; font-weight: 900; display: none; }
   .task.done .checkmark { display: block; }
+  .task.selected .checkmark { display: block; }
   .task-body { flex: 1; min-width: 0; }
   .task-label { font-size: 16px; line-height: 1.4; }
   .task-meta { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
@@ -736,6 +849,7 @@ const CSS = `
   .modal-section { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px; }
   .modal-section-title { font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
   .empty { text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 16px; }
+  .selection-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 10px; z-index: 150; font-size: 14px; font-weight: 600; color: var(--text); box-shadow: 0 -4px 16px rgba(0,0,0,0.08); }
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 8px; font-size: 16px; z-index: 300; opacity: 0; transition: opacity 0.2s; pointer-events: none; white-space: nowrap; }
   .toast.show { opacity: 1; }
   @media (max-width: 600px) { main { padding: 12px; } .header-stats { display: none; } .progress-bar { width: 50px; } .modal { padding: 16px; } }
