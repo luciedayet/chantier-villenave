@@ -67,6 +67,13 @@ export default function ChantierApp() {
   // Picker dropdowns open state
   const [openPicker, setOpenPicker] = useState<string | null>(null)
 
+  // Vue Achats
+  const [view, setView] = useState<'tasks' | 'purchases'>('tasks')
+  const [purchFilterApp, setPurchFilterApp] = useState('Tous')
+  const [purchFilterRoom, setPurchFilterRoom] = useState('Toutes')
+  const [purchFilterCat, setPurchFilterCat] = useState('Toutes')
+  const [purchSort, setPurchSort] = useState<'room' | 'cat' | 'app' | 'name' | 'price-asc' | 'price-desc'>('room')
+
   // Sélection multiple (appui long) + blocage groupé
   const [selectMode, setSelectMode] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
@@ -266,6 +273,12 @@ export default function ChantierApp() {
     setSelectedTaskIds([])
   }
 
+  function toggleView() {
+    exitSelectMode()
+    setOpenPicker(null)
+    setView(v => v === 'tasks' ? 'purchases' : 'tasks')
+  }
+
   function openBulkBlock() {
     setBulkBlockIds([])
     setBulkBlockModal(true)
@@ -318,6 +331,30 @@ export default function ChantierApp() {
   const bulkCommonRoom = selectedTasksList.length > 0 && selectedTasksList.every(t => t.room === selectedTasksList[0].room) ? selectedTasksList[0].room : null
   const bulkBlockOptions = tasks.filter(t => t.app === currentApp && (bulkCommonRoom ? t.room === bulkCommonRoom : true) && !selectedTaskIds.includes(t.id))
 
+  // ── Vue Achats : lignes à plat + filtres/tri ────────────────────────────────
+  const allPurchaseRows = tasks.flatMap(t => (t.purchases || []).map((p, i) => ({
+    key: `${t.id}-${i}`, task: t, app: t.app, room: t.room, cat: t.cat, name: p.name, price: p.price,
+  })))
+  const purchApps = [...new Set(allPurchaseRows.map(r => r.app))]
+  const purchRoomsForApp = [...new Set(allPurchaseRows.filter(r => purchFilterApp === 'Tous' || r.app === purchFilterApp).map(r => r.room))]
+  const purchCatsForRoom = [...new Set(allPurchaseRows.filter(r =>
+    (purchFilterApp === 'Tous' || r.app === purchFilterApp) && (purchFilterRoom === 'Toutes' || r.room === purchFilterRoom)
+  ).map(r => r.cat))]
+  const filteredPurchases = allPurchaseRows.filter(r =>
+    (purchFilterApp === 'Tous' || r.app === purchFilterApp) &&
+    (purchFilterRoom === 'Toutes' || r.room === purchFilterRoom) &&
+    (purchFilterCat === 'Toutes' || r.cat === purchFilterCat)
+  ).sort((a, b) => {
+    if (purchSort === 'app') return a.app.localeCompare(b.app) || a.room.localeCompare(b.room)
+    if (purchSort === 'room') return a.room.localeCompare(b.room) || a.cat.localeCompare(b.cat)
+    if (purchSort === 'cat') return a.cat.localeCompare(b.cat) || a.room.localeCompare(b.room)
+    if (purchSort === 'name') return a.name.localeCompare(b.name)
+    if (purchSort === 'price-asc') return (a.price ?? 0) - (b.price ?? 0)
+    if (purchSort === 'price-desc') return (b.price ?? 0) - (a.price ?? 0)
+    return 0
+  })
+  const purchasesTotal = filteredPurchases.reduce((s, r) => s + (r.price || 0), 0)
+
   return (
     <>
       <style>{CSS}</style>
@@ -332,22 +369,93 @@ export default function ChantierApp() {
           <div className="header-stat"><span>{statDone}</span> / <span>{statTotal}</span> tâches</div>
           <div className="header-stat"><span>{statBlocked}</span> bloquées</div>
         </div>
+        <button className="nav-toggle-btn" onClick={toggleView}>
+          {view === 'tasks' ? '🛒 Achats' : '📋 Tâches'}
+        </button>
       </header>
 
-      {/* Tabs */}
-      <div className="tabs-bar">
-        {apps.map(app => {
-          const appTasks = getAppTasks(app)
-          const done = appTasks.filter(t => t.done).length
-          return (
-            <button key={app} className={`tab${app === currentApp ? ' active' : ''}`} onClick={() => setCurrentApp(app)}>
-              {app} <span className="tab-badge">{done}/{appTasks.length}</span>
-            </button>
-          )
-        })}
-      </div>
+      {view === 'tasks' && (
+        <div className="tabs-bar">
+          {apps.map(app => {
+            const appTasks = getAppTasks(app)
+            const done = appTasks.filter(t => t.done).length
+            return (
+              <button key={app} className={`tab${app === currentApp ? ' active' : ''}`} onClick={() => setCurrentApp(app)}>
+                {app} <span className="tab-badge">{done}/{appTasks.length}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Vue Achats */}
+      {view === 'purchases' && (
+        <main>
+          <div className="purchases-toolbar">
+            <div className="purchases-filter">
+              <label>Appartement</label>
+              <select value={purchFilterApp} onChange={e => { setPurchFilterApp(e.target.value); setPurchFilterRoom('Toutes'); setPurchFilterCat('Toutes') }}>
+                <option>Tous</option>
+                {purchApps.map(a => <option key={a}>{a}</option>)}
+              </select>
+            </div>
+            <div className="purchases-filter">
+              <label>Pièce</label>
+              <select value={purchFilterRoom} onChange={e => { setPurchFilterRoom(e.target.value); setPurchFilterCat('Toutes') }}>
+                <option>Toutes</option>
+                {purchRoomsForApp.map(r => <option key={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="purchases-filter">
+              <label>Catégorie</label>
+              <select value={purchFilterCat} onChange={e => setPurchFilterCat(e.target.value)}>
+                <option>Toutes</option>
+                {purchCatsForRoom.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="purchases-filter">
+              <label>Trier par</label>
+              <select value={purchSort} onChange={e => setPurchSort(e.target.value as typeof purchSort)}>
+                <option value="room">Pièce</option>
+                <option value="cat">Catégorie</option>
+                <option value="app">Appartement</option>
+                <option value="name">Nom (A→Z)</option>
+                <option value="price-desc">Prix (plus cher d'abord)</option>
+                <option value="price-asc">Prix (moins cher d'abord)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="purchases-summary">
+            <span>{filteredPurchases.length} achat{filteredPurchases.length > 1 ? 's' : ''}</span>
+            <span>Total : {purchasesTotal.toFixed(2)} €</span>
+          </div>
+
+          {filteredPurchases.length === 0 ? (
+            <div className="empty">Aucun achat pour ces filtres.</div>
+          ) : (
+            <div className="purchase-list">
+              {filteredPurchases.map(r => (
+                <div key={r.key} className={`purchase-item${r.task.done ? ' done' : ''}`} onClick={() => openEdit(r.task)}>
+                  <div className="purchase-item-main">
+                    <span className="purchase-item-name">{r.name || '(sans nom)'}</span>
+                    <span className="purchase-item-price">{r.price != null ? `${r.price.toFixed(2)} €` : '—'}</span>
+                  </div>
+                  <div className="purchase-item-meta">
+                    <span className="badge badge-tag">{r.app}</span>
+                    <span className="badge badge-tag">{r.room}</span>
+                    <span className="badge badge-tag">{getCatIcon(r.cat)} {r.cat}</span>
+                    <span className="purchase-item-task">— {r.task.label}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      )}
 
       {/* Main */}
+      {view === 'tasks' && (
       <main style={selectMode ? { paddingBottom: 76 } : undefined}>
         <div className="toolbar">
           <div className="toolbar-filters">
@@ -430,6 +538,7 @@ export default function ChantierApp() {
           })}
         </div>
       </main>
+      )}
 
       {/* Barre de sélection multiple */}
       {selectMode && (
@@ -753,6 +862,8 @@ const CSS = `
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .tab-badge { display: inline-flex; align-items: center; justify-content: center; background: var(--surface2); color: var(--text-muted); font-size: 10px; font-weight: 700; border-radius: 10px; padding: 1px 6px; margin-left: 6px; }
   .tab.active .tab-badge { background: var(--accent-dim); color: var(--accent); }
+  .nav-toggle-btn { margin-left: auto; padding: 7px 14px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
+  .nav-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
   main { padding: 20px; max-width: 960px; margin: 0 auto; }
   .toolbar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
   .toolbar-filters { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
@@ -802,6 +913,22 @@ const CSS = `
   .badge-ok { background: var(--green-dim); color: var(--green); }
   .badge-person { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(74,158,255,0.2); }
   .badge-shop { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(243,156,18,0.2); }
+  .badge-tag { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+  .purchases-toolbar { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+  .purchases-filter { display: flex; flex-direction: column; gap: 5px; min-width: 150px; flex: 1; }
+  .purchases-filter label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+  .purchases-filter select { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 9px 12px; font-size: 15px; font-family: inherit; outline: none; transition: border-color 0.15s; }
+  .purchases-filter select:focus { border-color: var(--accent); }
+  .purchases-summary { display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 15px; font-weight: 600; }
+  .purchase-list { display: flex; flex-direction: column; gap: 8px; }
+  .purchase-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: background 0.1s; }
+  .purchase-item:hover { background: var(--surface2); }
+  .purchase-item.done { opacity: 0.5; }
+  .purchase-item-main { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .purchase-item-name { font-size: 16px; font-weight: 600; }
+  .purchase-item-price { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
+  .purchase-item-meta { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+  .purchase-item-task { font-size: 12px; color: var(--text-dim); }
   .picker-wrap { position: relative; }
   .picker-display { min-height: 38px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; transition: border-color 0.15s; }
   .picker-display:hover, .picker-display.open { border-color: var(--accent); }
