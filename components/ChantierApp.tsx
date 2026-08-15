@@ -39,7 +39,7 @@ export default function ChantierApp() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [apps, setApps] = useState<string[]>(['App 1', 'App 2', 'App 3', 'Extérieur'])
   const [currentApp, setCurrentApp] = useState('App 1')
-  const [activeFilter, setActiveFilter] = useState('all')
+  const [activeFilters, setActiveFilters] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; id: number } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -118,11 +118,18 @@ export default function ChantierApp() {
     const seen = new Set<string>()
     return tasks.filter(t => t.app === app && t.room === room && !seen.has(t.cat) && seen.add(t.cat)).map(t => t.cat)
   }
-  function filterTask(task: Task) {
-    if (activeFilter === 'done') return task.done
-    if (activeFilter === 'blocked') return isBlocked(task) && !task.done
-    if (activeFilter === 'todo') return !task.done && !isBlocked(task)
+  function matchesFilter(f: string, task: Task) {
+    if (f === 'done') return task.done
+    if (f === 'blocked') return isBlocked(task) && !task.done
+    if (f === 'todo') return !task.done && !isBlocked(task)
     return true
+  }
+  function filterTask(task: Task) {
+    if (activeFilters.length === 0) return true
+    return activeFilters.some(f => matchesFilter(f, task))
+  }
+  function toggleFilter(f: string) {
+    setActiveFilters(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
   }
 
   function showToast(msg: string) {
@@ -279,9 +286,12 @@ export default function ChantierApp() {
       <main>
         <div className="toolbar">
           <div className="toolbar-filters">
-            {(['all','todo','blocked','done'] as const).map(f => (
-              <button key={f} className={`filter-btn${activeFilter === f ? ' active' : ''}`} onClick={() => setActiveFilter(f)}>
-                {f === 'all' ? 'Tout' : f === 'todo' ? 'À faire' : f === 'blocked' ? 'Bloquées' : 'Terminées'}
+            <button className={`filter-btn${activeFilters.length === 0 ? ' active' : ''}`} onClick={() => setActiveFilters([])}>
+              Tout
+            </button>
+            {(['todo','blocked','done'] as const).map(f => (
+              <button key={f} className={`filter-btn${activeFilters.includes(f) ? ' active' : ''}`} onClick={() => toggleFilter(f)}>
+                {f === 'todo' ? 'À faire' : f === 'blocked' ? 'Bloquées' : 'Terminées'}
               </button>
             ))}
           </div>
@@ -296,7 +306,7 @@ export default function ChantierApp() {
             const roomDone = roomTasks.filter(t => t.done).length
             const pct = roomTasks.length ? Math.round(roomDone / roomTasks.length * 100) : 0
             const filteredRoom = roomTasks.filter(filterTask)
-            if (!filteredRoom.length && activeFilter !== 'all') return null
+            if (!filteredRoom.length && activeFilters.length > 0) return null
             const cats = getCats(currentApp, room)
 
             return (
@@ -304,7 +314,7 @@ export default function ChantierApp() {
                 {cats.map(cat => {
                   const catTasks = tasks.filter(t => t.app === currentApp && t.room === room && t.cat === cat)
                   const filtered = catTasks.filter(filterTask)
-                  if (!filtered.length && activeFilter !== 'all') return null
+                  if (!filtered.length && activeFilters.length > 0) return null
                   return (
                     <div key={cat} className="category">
                       <div className="category-title">
