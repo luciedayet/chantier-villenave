@@ -7,12 +7,12 @@ export function middleware(req: NextRequest) {
   if (pathname.startsWith('/chantier') && auth !== 'true') {
     return NextResponse.redirect(new URL('/', req.url))
   }
-  if (pathname.startsWith('/api/tasks') && auth !== 'true') {
+  if ((pathname.startsWith('/api/tasks') || pathname.startsWith('/api/expenses')) && auth !== 'true') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/chantier/:path*', '/api/tasks/:path*'],
+  matcher: ['/chantier/:path*', '/api/tasks/:path*', '/api/expenses/:path*'],
 }
