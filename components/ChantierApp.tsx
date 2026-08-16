@@ -43,6 +43,7 @@ export default function ChantierApp() {
   const [apps, setApps] = useState<string[]>(['App 1', 'App 2', 'App 3', 'Extérieur'])
   const [currentApp, setCurrentApp] = useState('App 1')
   const [activeFilters, setActiveFilters] = useState<string[]>([])
+  const [taskSort, setTaskSort] = useState<'default' | 'assignee'>('default')
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ msg: string; id: number } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -318,6 +319,43 @@ export default function ChantierApp() {
     setter(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name])
   }
 
+  function renderTaskRow(task: Task, key: string) {
+    const blocked = isBlocked(task)
+    const blockingLabels = getBlockingLabels(task)
+    const blockedPending = blockingLabels.filter(b => !b.done)
+    const blockedOk = blockingLabels.filter(b => b.done)
+    const isSelected = selectedTaskIds.includes(task.id)
+    return (
+      <div
+        key={key}
+        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}`}
+        onClick={() => handleTaskClick(task)}
+        onMouseDown={() => startLongPress(task.id)}
+        onMouseUp={cancelLongPress}
+        onMouseLeave={cancelLongPress}
+        onTouchStart={() => startLongPress(task.id)}
+        onTouchEnd={cancelLongPress}
+        onTouchMove={cancelLongPress}
+      >
+        <button className="task-check" onClick={e => { e.stopPropagation(); selectMode ? toggleTaskSelection(task.id) : toggleTask(task.id) }}>
+          <span className="checkmark">✓</span>
+        </button>
+        <div className="task-body">
+          <div className="task-label">{task.label}</div>
+          <div className="task-meta">
+            {blockedPending.length > 0 && <span className="badge badge-blocked">🔒 {blockedPending.map(b => b.label).join(', ')}</span>}
+            {blockedOk.length > 0 && blockedPending.length === 0 && blockingLabels.length > 0 && <span className="badge badge-ok">✓ Dépendances OK</span>}
+            {(task.assignees || []).map(a => <span key={a} className="badge badge-person">👷 {a}</span>)}
+            {(task.purchases || []).length > 0 && (() => {
+              const total = (task.purchases || []).reduce((s, p) => s + (p.price || 0), 0)
+              return <span className="badge badge-shop">🛒 {task.purchases.length} achat{task.purchases.length > 1 ? 's' : ''}{total > 0 ? ` · ${total.toFixed(0)} €` : ''}</span>
+            })()}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#F4F5F7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6275', fontFamily: 'system-ui' }}>
@@ -333,6 +371,21 @@ export default function ChantierApp() {
   const selectedTasksList = tasks.filter(t => selectedTaskIds.includes(t.id))
   const bulkCommonRoom = selectedTasksList.length > 0 && selectedTasksList.every(t => t.room === selectedTasksList[0].room) ? selectedTasksList[0].room : null
   const bulkBlockOptions = tasks.filter(t => t.app === currentApp && (bulkCommonRoom ? t.room === bulkCommonRoom : true) && !selectedTaskIds.includes(t.id))
+
+  // ── Tri par assignation ──────────────────────────────────────────────────────
+  const currentAppTasks = tasks.filter(t => t.app === currentApp).filter(filterTask)
+  const assigneeGroups: Record<string, Task[]> = {}
+  for (const t of currentAppTasks) {
+    const people = (t.assignees && t.assignees.length) ? t.assignees : ['Non assigné']
+    for (const person of people) {
+      (assigneeGroups[person] ||= []).push(t)
+    }
+  }
+  const assigneeNames = Object.keys(assigneeGroups).sort((a, b) => {
+    if (a === 'Non assigné') return 1
+    if (b === 'Non assigné') return -1
+    return a.localeCompare(b)
+  })
 
   // ── Vue Achats : lignes à plat + filtres/tri ────────────────────────────────
   const allPurchaseRows = tasks.flatMap(t => (t.purchases || []).map((p, i) => ({
@@ -482,9 +535,29 @@ export default function ChantierApp() {
               </button>
             ))}
           </div>
+          <select className="sort-select" value={taskSort} onChange={e => setTaskSort(e.target.value as typeof taskSort)}>
+            <option value="default">Trier : Pièce / Catégorie</option>
+            <option value="assignee">Trier : Assignation</option>
+          </select>
           <button className="btn-primary" onClick={() => openAdd()}>＋ Ajouter</button>
         </div>
 
+        {taskSort === 'assignee' ? (
+          <div id="assigneesContainer">
+            {assigneeNames.length === 0 ? (
+              <div className="empty">Aucune tâche pour {currentApp} — cliquez sur "＋ Ajouter".</div>
+            ) : assigneeNames.map(person => {
+              const personTasks = assigneeGroups[person]
+              const personDone = personTasks.filter(t => t.done).length
+              const pct = personTasks.length ? Math.round(personDone / personTasks.length * 100) : 0
+              return (
+                <RoomSection key={person} room={person === 'Non assigné' ? person : `👷 ${person}`} pct={pct}>
+                  {personTasks.map(task => renderTaskRow(task, `${person}-${task.id}`))}
+                </RoomSection>
+              )
+            })}
+          </div>
+        ) : (
         <div id="roomsContainer">
           {rooms.length === 0 ? (
             <div className="empty">Aucune tâche pour {currentApp} — cliquez sur "＋ Ajouter".</div>
@@ -508,42 +581,7 @@ export default function ChantierApp() {
                         <span className="cat-icon">{getCatIcon(cat)}</span>{cat}
                         <button className="cat-add-btn" onClick={e => { e.stopPropagation(); openAdd(room, cat) }} title={`Ajouter une tâche · ${room} / ${cat}`}>＋</button>
                       </div>
-                      {filtered.map(task => {
-                        const blocked = isBlocked(task)
-                        const blockingLabels = getBlockingLabels(task)
-                        const blockedPending = blockingLabels.filter(b => !b.done)
-                        const blockedOk = blockingLabels.filter(b => b.done)
-                        const isSelected = selectedTaskIds.includes(task.id)
-                        return (
-                          <div
-                            key={task.id}
-                            className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}`}
-                            onClick={() => handleTaskClick(task)}
-                            onMouseDown={() => startLongPress(task.id)}
-                            onMouseUp={cancelLongPress}
-                            onMouseLeave={cancelLongPress}
-                            onTouchStart={() => startLongPress(task.id)}
-                            onTouchEnd={cancelLongPress}
-                            onTouchMove={cancelLongPress}
-                          >
-                            <button className="task-check" onClick={e => { e.stopPropagation(); selectMode ? toggleTaskSelection(task.id) : toggleTask(task.id) }}>
-                              <span className="checkmark">✓</span>
-                            </button>
-                            <div className="task-body">
-                              <div className="task-label">{task.label}</div>
-                              <div className="task-meta">
-                                {blockedPending.length > 0 && <span className="badge badge-blocked">🔒 {blockedPending.map(b => b.label).join(', ')}</span>}
-                                {blockedOk.length > 0 && blockedPending.length === 0 && blockingLabels.length > 0 && <span className="badge badge-ok">✓ Dépendances OK</span>}
-                                {(task.assignees || []).map(a => <span key={a} className="badge badge-person">👷 {a}</span>)}
-                                {(task.purchases || []).length > 0 && (() => {
-                                  const total = (task.purchases || []).reduce((s, p) => s + (p.price || 0), 0)
-                                  return <span className="badge badge-shop">🛒 {task.purchases.length} achat{task.purchases.length > 1 ? 's' : ''}{total > 0 ? ` · ${total.toFixed(0)} €` : ''}</span>
-                                })()}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
+                      {filtered.map(task => renderTaskRow(task, task.id))}
                     </div>
                   )
                 })}
@@ -551,6 +589,7 @@ export default function ChantierApp() {
             )
           })}
         </div>
+        )}
       </main>
       )}
 
@@ -887,6 +926,8 @@ const CSS = `
   .filter-btn { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-size: 14px; cursor: pointer; transition: all 0.15s; }
   .filter-btn:hover { border-color: var(--text-muted); color: var(--text); }
   .filter-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .sort-select { padding: 6px 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 14px; font-family: inherit; cursor: pointer; outline: none; transition: border-color 0.15s; }
+  .sort-select:focus { border-color: var(--accent); }
   .btn-primary { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: 16px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; display: flex; align-items: center; gap: 6px; }
   .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-primary:hover { opacity: 0.88; }
