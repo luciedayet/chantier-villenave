@@ -19,7 +19,10 @@ function escHtml(s: string) {
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-type Purchase = { name: string; price: number | null }
+type Purchase = { name: string; price: number | null; url?: string | null }
+function normalizeUrl(url: string) {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`
+}
 type AppTask = Omit<Task, 'blocked_by_ids'> & { blockedByIds: string[] }
 
 async function api<T>(url: string, init?: RequestInit): Promise<{ data?: T; error?: string }> {
@@ -333,7 +336,7 @@ export default function ChantierApp() {
 
   // ── Vue Achats : lignes à plat + filtres/tri ────────────────────────────────
   const allPurchaseRows = tasks.flatMap(t => (t.purchases || []).map((p, i) => ({
-    key: `${t.id}-${i}`, task: t, app: t.app, room: t.room, cat: t.cat, name: p.name, price: p.price,
+    key: `${t.id}-${i}`, task: t, app: t.app, room: t.room, cat: t.cat, name: p.name, price: p.price, url: p.url,
   })))
   const purchApps = [...new Set(allPurchaseRows.map(r => r.app))]
   const purchRoomsForApp = [...new Set(allPurchaseRows.filter(r => purchFilterApp === 'Tous' || r.app === purchFilterApp).map(r => r.room))]
@@ -445,6 +448,17 @@ export default function ChantierApp() {
                     <span className="badge badge-tag">{r.app}</span>
                     <span className="badge badge-tag">{r.room}</span>
                     <span className="badge badge-tag">{getCatIcon(r.cat)} {r.cat}</span>
+                    {r.url && (
+                      <a
+                        className="badge badge-link"
+                        href={normalizeUrl(r.url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        🔗 Voir le produit
+                      </a>
+                    )}
                     <span className="purchase-item-task">— {r.task.label}</span>
                   </div>
                 </div>
@@ -808,7 +822,7 @@ function PurchasesList({ purchases, onChange }: { purchases: Purchase[]; onChang
     onChange(next)
   }
   function remove(index: number) { onChange(purchases.filter((_, i) => i !== index)) }
-  function add() { onChange([...purchases, { name: '', price: null }]) }
+  function add() { onChange([...purchases, { name: '', price: null, url: null }]) }
   const total = purchases.reduce((s, p) => s + (p.price || 0), 0)
 
   return (
@@ -819,12 +833,15 @@ function PurchasesList({ purchases, onChange }: { purchases: Purchase[]; onChang
         <div style={{ width: 34 }} />
       </div>
       {purchases.map((p, i) => (
-        <div key={i} className="purchase-row">
-          <input className="purchase-name" type="text" placeholder="Libellé" value={p.name} onChange={e => update(i, 'name', e.target.value)} />
-          <div className="purchase-price-wrap">
-            <input className="purchase-price" type="number" min="0" step="0.01" placeholder="0" value={p.price ?? ''} onChange={e => update(i, 'price', e.target.value ? parseFloat(e.target.value) : null)} />
+        <div key={i} className="purchase-row-group">
+          <div className="purchase-row">
+            <input className="purchase-name" type="text" placeholder="Libellé" value={p.name} onChange={e => update(i, 'name', e.target.value)} />
+            <div className="purchase-price-wrap">
+              <input className="purchase-price" type="number" min="0" step="0.01" placeholder="0" value={p.price ?? ''} onChange={e => update(i, 'price', e.target.value ? parseFloat(e.target.value) : null)} />
+            </div>
+            <button className="remove-purchase" onClick={() => remove(i)}>✕</button>
           </div>
-          <button className="remove-purchase" onClick={() => remove(i)}>✕</button>
+          <input className="purchase-url" type="url" placeholder="🔗 Lien vers le produit (optionnel)" value={p.url ?? ''} onChange={e => update(i, 'url', e.target.value)} />
         </div>
       ))}
       {purchases.length > 0 && total > 0 && (
@@ -914,6 +931,8 @@ const CSS = `
   .badge-person { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(74,158,255,0.2); }
   .badge-shop { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(243,156,18,0.2); }
   .badge-tag { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+  .badge-link { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(74,158,255,0.2); text-decoration: none; cursor: pointer; }
+  .badge-link:hover { text-decoration: underline; }
   .purchases-toolbar { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
   .purchases-filter { display: flex; flex-direction: column; gap: 5px; min-width: 150px; flex: 1; }
   .purchases-filter label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
@@ -945,7 +964,8 @@ const CSS = `
   .picker-option.selected { color: var(--accent); }
   .opt-check { width: 14px; height: 14px; border-radius: 3px; border: 2px solid var(--border); flex-shrink: 0; display: grid; place-items: center; font-size: 9px; }
   .picker-option.selected .opt-check { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 900; }
-  .purchase-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .purchase-row-group { margin-bottom: 10px; }
+  .purchase-row { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
   .purchase-name { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 8px 10px; font-size: 16px; font-family: inherit; outline: none; transition: border-color 0.15s; }
   .purchase-name:focus { border-color: var(--accent); }
   .purchase-price-wrap { position: relative; flex-shrink: 0; }
@@ -953,6 +973,8 @@ const CSS = `
   .purchase-price { width: 80px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 8px 24px 8px 10px; font-size: 16px; font-family: inherit; outline: none; transition: border-color 0.15s; -moz-appearance: textfield; appearance: textfield; }
   .purchase-price::-webkit-outer-spin-button, .purchase-price::-webkit-inner-spin-button { -webkit-appearance: none; }
   .purchase-price:focus { border-color: var(--accent); }
+  .purchase-url { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 6px 10px; font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.15s; }
+  .purchase-url:focus { border-color: var(--accent); }
   .remove-purchase { width: 34px; height: 34px; border-radius: 4px; border: none; background: none; color: var(--text-dim); cursor: pointer; font-size: 16px; flex-shrink: 0; display: grid; place-items: center; transition: all 0.15s; }
   .remove-purchase:hover { background: var(--red-dim); color: var(--red); }
   .purchases-total { display: flex; justify-content: flex-end; font-size: 14px; font-weight: 700; color: var(--accent); margin-top: 4px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }

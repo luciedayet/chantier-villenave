@@ -1,4 +1,4 @@
-export type Purchase = { name: string; price: number | null }
+export type Purchase = { name: string; price: number | null; url?: string | null }
 
 export type Task = {
   id: string
