@@ -79,14 +79,19 @@ export default function ChantierApp() {
   const [purchSort, setPurchSort] = useState<'room' | 'cat' | 'app' | 'name' | 'price-asc' | 'price-desc'>('room')
 
   // Vue Dépenses
-  type ExpenseEntry = { id: string; props: Record<string, any> }
-  const [expenses, setExpenses] = useState<ExpenseEntry[]>([])
-  const [expSchema, setExpSchema] = useState<Record<string, string>>({})
+  type Expense = {
+    id: string; nom: string; prixUnitaire: number | null; quantite: number | null
+    total: number; poste: string[]; piece: string | null; magasin: string | null
+    payeur: string | null; rembourse: boolean; rendu: number | null; date: string | null
+  }
+  const [expenses, setExpenses] = useState<Expense[]>([])
   const [expStatus, setExpStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [expError, setExpError] = useState<string | null>(null)
   const [expFilterPoste, setExpFilterPoste] = useState('Tous')
-  const [expFilterApp, setExpFilterApp] = useState('Tous')
-  const [expSort, setExpSort] = useState<'poste' | 'app' | 'name' | 'amount-asc' | 'amount-desc'>('amount-desc')
+  const [expFilterPiece, setExpFilterPiece] = useState('Toutes')
+  const [expFilterPayeur, setExpFilterPayeur] = useState('Tous')
+  const [expFilterRembourse, setExpFilterRembourse] = useState<'tous' | 'non' | 'oui'>('tous')
+  const [expSort, setExpSort] = useState<'poste' | 'piece' | 'name' | 'amount-asc' | 'amount-desc' | 'date'>('amount-desc')
 
   // Sélection multiple (appui long) + blocage groupé
   const [selectMode, setSelectMode] = useState(false)
@@ -310,7 +315,6 @@ export default function ChantierApp() {
       const json = await res.json()
       if (json.data) {
         setExpenses(json.data)
-        setExpSchema(json.schema || {})
         setExpStatus('done')
       } else {
         setExpError(json.error || 'Erreur inconnue')
@@ -450,75 +454,40 @@ export default function ChantierApp() {
   })
   const purchasesTotal = filteredPurchases.reduce((s, r) => s + (r.price || 0), 0)
 
-  // ── Vue Dépenses : détection des propriétés ──────────────────────────────────
-  function findPropKey(schema: Record<string, string>, type: string, hints: string[]): string | null {
-    for (const hint of hints) {
-      const key = Object.keys(schema).find(k => k.toLowerCase().includes(hint.toLowerCase()) && schema[k] === type)
-      if (key) return key
-    }
-    return Object.keys(schema).find(k => schema[k] === type) ?? null
-  }
-  const expTitleKey = findPropKey(expSchema, 'title', ['nom', 'name', 'libellé', 'titre', 'label'])
-  const expAmountKey = findPropKey(expSchema, 'number', ['montant', 'amount', 'prix', 'total', 'coût', 'cout', 'price'])
-    ?? findPropKey(expSchema, 'formula', ['montant', 'amount', 'total', 'prix'])
-    ?? findPropKey(expSchema, 'rollup', ['montant', 'amount', 'total'])
-  const expPosteKey = findPropKey(expSchema, 'select', ['poste', 'catégorie', 'categorie', 'type', 'lot', 'budget'])
-    ?? findPropKey(expSchema, 'multi_select', ['poste', 'catégorie', 'categorie', 'type', 'lot'])
-    ?? findPropKey(expSchema, 'status', ['poste', 'statut', 'status', 'état', 'etat'])
-  const expAppKey = findPropKey(expSchema, 'select', ['appartement', 'app', 'logement', 'bien', 'studio'])
-    ?? findPropKey(expSchema, 'rich_text', ['appartement', 'app', 'logement'])
-
-  function expGetTitle(e: { id: string; props: Record<string, any> }) {
-    if (expTitleKey) return String(e.props[expTitleKey] ?? '')
-    const titleProp = Object.keys(expSchema).find(k => expSchema[k] === 'title')
-    return titleProp ? String(e.props[titleProp] ?? '') : e.id
-  }
-  function expGetAmount(e: { id: string; props: Record<string, any> }): number {
-    if (!expAmountKey) return 0
-    const v = e.props[expAmountKey]
-    return typeof v === 'number' ? v : 0
-  }
-  function expGetPoste(e: { id: string; props: Record<string, any> }): string {
-    if (!expPosteKey) return '—'
-    const v = e.props[expPosteKey]
-    if (Array.isArray(v)) return v.join(', ') || '—'
-    return v ? String(v) : '—'
-  }
-  function expGetApp(e: { id: string; props: Record<string, any> }): string {
-    if (!expAppKey) return '—'
-    const v = e.props[expAppKey]
-    if (Array.isArray(v)) return v.join(', ') || '—'
-    return v ? String(v) : '—'
-  }
-
-  const allPostes = [...new Set(expenses.map(expGetPoste))].filter(p => p !== '—').sort()
-  const allExpApps = [...new Set(expenses.map(expGetApp))].filter(a => a !== '—').sort()
+  // ── Vue Dépenses ─────────────────────────────────────────────────────────────
+  const fmt = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const allPostes = [...new Set(expenses.flatMap(e => e.poste))].sort()
+  const allPieces = [...new Set(expenses.map(e => e.piece).filter(Boolean) as string[])].sort()
+  const allPayeurs = [...new Set(expenses.map(e => e.payeur).filter(Boolean) as string[])].sort()
 
   const filteredExpenses = expenses.filter(e =>
-    (expFilterPoste === 'Tous' || expGetPoste(e) === expFilterPoste) &&
-    (expFilterApp === 'Tous' || expGetApp(e) === expFilterApp)
+    (expFilterPoste === 'Tous' || e.poste.includes(expFilterPoste)) &&
+    (expFilterPiece === 'Toutes' || e.piece === expFilterPiece) &&
+    (expFilterPayeur === 'Tous' || e.payeur === expFilterPayeur) &&
+    (expFilterRembourse === 'tous' || (expFilterRembourse === 'oui' ? e.rembourse : !e.rembourse))
   ).sort((a, b) => {
-    if (expSort === 'poste') return expGetPoste(a).localeCompare(expGetPoste(b))
-    if (expSort === 'app') return expGetApp(a).localeCompare(expGetApp(b))
-    if (expSort === 'name') return expGetTitle(a).localeCompare(expGetTitle(b))
-    if (expSort === 'amount-asc') return expGetAmount(a) - expGetAmount(b)
-    if (expSort === 'amount-desc') return expGetAmount(b) - expGetAmount(a)
+    if (expSort === 'poste') return (a.poste[0] ?? '').localeCompare(b.poste[0] ?? '')
+    if (expSort === 'piece') return (a.piece ?? '').localeCompare(b.piece ?? '')
+    if (expSort === 'name') return a.nom.localeCompare(b.nom)
+    if (expSort === 'amount-asc') return a.total - b.total
+    if (expSort === 'amount-desc') return b.total - a.total
+    if (expSort === 'date') return (b.date ?? '').localeCompare(a.date ?? '')
     return 0
   })
-  const expTotal = filteredExpenses.reduce((s, e) => s + expGetAmount(e), 0)
+  const expTotal = filteredExpenses.reduce((s, e) => s + e.total, 0)
+  const expTotalRembourse = filteredExpenses.filter(e => e.rembourse).reduce((s, e) => s + e.total, 0)
 
-  // KPIs groupés
-  const kpiByPoste: Record<string, number> = {}
-  const kpiByApp: Record<string, number> = {}
+  // KPIs par poste (chaque expense peut être dans plusieurs postes)
+  const kpiByPoste: Record<string, { total: number; count: number }> = {}
   for (const e of filteredExpenses) {
-    const poste = expGetPoste(e)
-    const app = expGetApp(e)
-    const amount = expGetAmount(e)
-    kpiByPoste[poste] = (kpiByPoste[poste] || 0) + amount
-    kpiByApp[app] = (kpiByApp[app] || 0) + amount
+    const postes = e.poste.length ? e.poste : ['—']
+    for (const p of postes) {
+      if (!kpiByPoste[p]) kpiByPoste[p] = { total: 0, count: 0 }
+      kpiByPoste[p].total += e.total / postes.length
+      kpiByPoste[p].count += 1
+    }
   }
-  const kpiPosteEntries = Object.entries(kpiByPoste).sort((a, b) => b[1] - a[1])
-  const kpiAppEntries = Object.entries(kpiByApp).sort((a, b) => b[1] - a[1])
+  const kpiPosteEntries = Object.entries(kpiByPoste).sort((a, b) => b[1].total - a[1].total)
 
   return (
     <>
@@ -642,10 +611,14 @@ export default function ChantierApp() {
               <div className="exp-error-icon">⚠️</div>
               <div className="exp-error-title">Impossible de charger les dépenses</div>
               <div className="exp-error-msg">{expError}</div>
+              {expError?.includes('shared with your integration') && (
+                <div className="exp-error-hint">
+                  Dans Notion, ouvre la base "💸 Travaux / Achats" → <strong>⋯</strong> → <strong>Add connections</strong> → cherche "Chantier Villenave".
+                </div>
+              )}
               {expError?.includes('NOTION_EXPENSES_DATABASE_ID') && (
                 <div className="exp-error-hint">
-                  Ajoutez la variable <code>NOTION_EXPENSES_DATABASE_ID</code> dans les paramètres Vercel avec la valeur&nbsp;:
-                  <br /><code>373aea3aab0380f0a304e52452c9266d</code>
+                  Ajoutez <code>NOTION_EXPENSES_DATABASE_ID</code> dans les paramètres Vercel.
                 </div>
               )}
               <button className="btn-ghost" style={{ marginTop: 16 }} onClick={() => { setExpStatus('idle'); loadExpenses() }}>Réessayer</button>
@@ -663,87 +636,92 @@ export default function ChantierApp() {
                     </select>
                   </div>
                 )}
-                {allExpApps.length > 0 && (
+                {allPieces.length > 0 && (
                   <div className="purchases-filter">
-                    <label>Appartement</label>
-                    <select value={expFilterApp} onChange={e => setExpFilterApp(e.target.value)}>
+                    <label>Pièce</label>
+                    <select value={expFilterPiece} onChange={e => setExpFilterPiece(e.target.value)}>
+                      <option>Toutes</option>
+                      {allPieces.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                )}
+                {allPayeurs.length > 0 && (
+                  <div className="purchases-filter">
+                    <label>Payeur</label>
+                    <select value={expFilterPayeur} onChange={e => setExpFilterPayeur(e.target.value)}>
                       <option>Tous</option>
-                      {allExpApps.map(a => <option key={a}>{a}</option>)}
+                      {allPayeurs.map(p => <option key={p}>{p}</option>)}
                     </select>
                   </div>
                 )}
                 <div className="purchases-filter">
+                  <label>Remboursé</label>
+                  <select value={expFilterRembourse} onChange={e => setExpFilterRembourse(e.target.value as typeof expFilterRembourse)}>
+                    <option value="tous">Tous</option>
+                    <option value="non">Non remboursé</option>
+                    <option value="oui">Remboursé</option>
+                  </select>
+                </div>
+                <div className="purchases-filter">
                   <label>Trier par</label>
                   <select value={expSort} onChange={e => setExpSort(e.target.value as typeof expSort)}>
-                    <option value="amount-desc">Montant (décroissant)</option>
-                    <option value="amount-asc">Montant (croissant)</option>
-                    {allPostes.length > 0 && <option value="poste">Poste</option>}
-                    {allExpApps.length > 0 && <option value="app">Appartement</option>}
+                    <option value="amount-desc">Montant ↓</option>
+                    <option value="amount-asc">Montant ↑</option>
+                    <option value="date">Date récente</option>
+                    <option value="poste">Poste</option>
+                    <option value="piece">Pièce</option>
                     <option value="name">Nom (A→Z)</option>
                   </select>
                 </div>
               </div>
 
-              {/* KPIs */}
+              {/* KPIs par poste */}
               <div className="exp-kpi-grid">
-                <div className="exp-kpi-card">
+                <div className="exp-kpi-card" style={{ cursor: 'pointer' }} onClick={() => { setExpFilterPoste('Tous'); setExpFilterPiece('Toutes'); setExpFilterPayeur('Tous'); setExpFilterRembourse('tous') }}>
                   <div className="exp-kpi-title">Total</div>
-                  <div className="exp-kpi-value">{expTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
-                  <div className="exp-kpi-sub">{filteredExpenses.length} dépense{filteredExpenses.length > 1 ? 's' : ''}</div>
+                  <div className="exp-kpi-value">{fmt(expTotal)} €</div>
+                  <div className="exp-kpi-sub">{filteredExpenses.length} dépense{filteredExpenses.length > 1 ? 's' : ''}{expTotalRembourse > 0 ? ` · ${fmt(expTotalRembourse)} € remb.` : ''}</div>
                 </div>
-                {kpiPosteEntries.length > 1 && kpiPosteEntries.map(([poste, total]) => (
-                  <div key={poste} className="exp-kpi-card exp-kpi-card--poste" onClick={() => setExpFilterPoste(expFilterPoste === poste ? 'Tous' : poste)} style={{ cursor: 'pointer' }}>
+                {kpiPosteEntries.map(([poste, { total, count }]) => (
+                  <div key={poste} className={`exp-kpi-card exp-kpi-card--poste${expFilterPoste === poste ? ' exp-kpi-card--active' : ''}`} onClick={() => setExpFilterPoste(expFilterPoste === poste ? 'Tous' : poste)} style={{ cursor: 'pointer' }}>
                     <div className="exp-kpi-title">{poste}</div>
-                    <div className="exp-kpi-value">{total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                    <div className="exp-kpi-value">{fmt(total)} €</div>
                     <div className="exp-kpi-bar"><div className="exp-kpi-bar-fill" style={{ width: `${expTotal > 0 ? Math.round(total / expTotal * 100) : 0}%` }} /></div>
-                    <div className="exp-kpi-sub">{expTotal > 0 ? Math.round(total / expTotal * 100) : 0}%</div>
+                    <div className="exp-kpi-sub">{expTotal > 0 ? Math.round(total / expTotal * 100) : 0}% · {count} ligne{count > 1 ? 's' : ''}</div>
                   </div>
                 ))}
               </div>
 
-              {kpiAppEntries.length > 1 && (
-                <div className="exp-kpi-grid" style={{ marginTop: 12 }}>
-                  {kpiAppEntries.map(([app, total]) => (
-                    <div key={app} className="exp-kpi-card exp-kpi-card--app" onClick={() => setExpFilterApp(expFilterApp === app ? 'Tous' : app)} style={{ cursor: 'pointer' }}>
-                      <div className="exp-kpi-title">{app}</div>
-                      <div className="exp-kpi-value">{total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
-                      <div className="exp-kpi-bar"><div className="exp-kpi-bar-fill exp-kpi-bar-fill--blue" style={{ width: `${expTotal > 0 ? Math.round(total / expTotal * 100) : 0}%` }} /></div>
-                      <div className="exp-kpi-sub">{expTotal > 0 ? Math.round(total / expTotal * 100) : 0}%</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {/* Liste */}
+              <div className="purchases-summary" style={{ marginTop: 16 }}>
+                <span>{filteredExpenses.length} dépense{filteredExpenses.length > 1 ? 's' : ''}</span>
+                <span>Total : {fmt(expTotal)} €</span>
+              </div>
               {filteredExpenses.length === 0 ? (
                 <div className="empty">Aucune dépense pour ces filtres.</div>
               ) : (
-                <div className="purchase-list" style={{ marginTop: 16 }}>
-                  {filteredExpenses.map(e => {
-                    const title = expGetTitle(e)
-                    const amount = expGetAmount(e)
-                    const poste = expGetPoste(e)
-                    const app = expGetApp(e)
-                    return (
-                      <div key={e.id} className="purchase-item">
-                        <div className="purchase-item-main">
-                          <span className="purchase-item-name">{title || '(sans nom)'}</span>
-                          <span className="purchase-item-price">{amount > 0 ? `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '—'}</span>
-                        </div>
-                        <div className="purchase-item-meta">
-                          {poste !== '—' && <span className="badge badge-tag">📂 {poste}</span>}
-                          {app !== '—' && <span className="badge badge-tag">🏠 {app}</span>}
-                          {Object.entries(e.props).filter(([k, v]) =>
-                            k !== expTitleKey && k !== expAmountKey && k !== expPosteKey && k !== expAppKey &&
-                            v !== null && v !== '' && !Array.isArray(v) && typeof v !== 'boolean' &&
-                            ['select', 'status', 'rich_text', 'date'].includes(expSchema[k])
-                          ).map(([k, v]) => (
-                            <span key={k} className="badge badge-tag" title={k}>{String(v)}</span>
-                          ))}
-                        </div>
+                <div className="purchase-list">
+                  {filteredExpenses.map(e => (
+                    <div key={e.id} className={`purchase-item${e.rembourse ? ' done' : ''}`}>
+                      <div className="purchase-item-main">
+                        <span className="purchase-item-name">{e.nom || '(sans nom)'}</span>
+                        <span className="purchase-item-price">{e.total > 0 ? `${fmt(e.total)} €` : '—'}</span>
                       </div>
-                    )
-                  })}
+                      {(e.prixUnitaire != null || e.quantite != null) && (
+                        <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2, marginBottom: 4 }}>
+                          {e.prixUnitaire != null && `${fmt(e.prixUnitaire)} €`}{e.quantite != null && e.prixUnitaire != null && ' × '}{e.quantite != null && `${e.quantite}`}
+                        </div>
+                      )}
+                      <div className="purchase-item-meta">
+                        {e.poste.map(p => <span key={p} className="badge badge-tag">📂 {p}</span>)}
+                        {e.piece && <span className="badge badge-tag">🚪 {e.piece}</span>}
+                        {e.magasin && <span className="badge badge-tag">🏪 {e.magasin}</span>}
+                        {e.payeur && <span className="badge badge-person">👤 {e.payeur}</span>}
+                        {e.date && <span className="badge badge-tag">📅 {new Date(e.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>}
+                        {e.rembourse && <span className="badge badge-ok">✓ Remboursé</span>}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </>
@@ -1287,6 +1265,7 @@ const CSS = `
   .exp-kpi-card:hover { border-color: var(--accent); }
   .exp-kpi-card--poste { border-left: 3px solid var(--accent); }
   .exp-kpi-card--app { border-left: 3px solid var(--blue); }
+  .exp-kpi-card--active { background: var(--accent-dim); border-color: var(--accent); }
   .exp-kpi-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .exp-kpi-value { font-size: 20px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
   .exp-kpi-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
