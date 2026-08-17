@@ -82,8 +82,8 @@ export default function ChantierApp() {
   type ExpenseEntry = { id: string; props: Record<string, any> }
   const [expenses, setExpenses] = useState<ExpenseEntry[]>([])
   const [expSchema, setExpSchema] = useState<Record<string, string>>({})
-  const [expLoading, setExpLoading] = useState(false)
-  const [expLoaded, setExpLoaded] = useState(false)
+  const [expStatus, setExpStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [expError, setExpError] = useState<string | null>(null)
   const [expFilterPoste, setExpFilterPoste] = useState('Tous')
   const [expFilterApp, setExpFilterApp] = useState('Tous')
   const [expSort, setExpSort] = useState<'poste' | 'app' | 'name' | 'amount-asc' | 'amount-desc'>('amount-desc')
@@ -113,7 +113,7 @@ export default function ChantierApp() {
   }, [])
 
   useEffect(() => {
-    if (view === 'expenses') loadExpenses()
+    if (view === 'expenses' && expStatus === 'idle') loadExpenses()
   }, [view])
 
   async function loadTasks() {
@@ -302,18 +302,24 @@ export default function ChantierApp() {
   }
 
   async function loadExpenses() {
-    if (expLoaded) return
-    setExpLoading(true)
+    if (expStatus === 'done' || expStatus === 'loading') return
+    setExpStatus('loading')
+    setExpError(null)
     try {
       const res = await fetch('/api/expenses')
       const json = await res.json()
       if (json.data) {
         setExpenses(json.data)
         setExpSchema(json.schema || {})
-        setExpLoaded(true)
+        setExpStatus('done')
+      } else {
+        setExpError(json.error || 'Erreur inconnue')
+        setExpStatus('error')
       }
-    } catch (e) { console.error(e) }
-    setExpLoading(false)
+    } catch (e: any) {
+      setExpError(e.message || 'Erreur réseau')
+      setExpStatus('error')
+    }
   }
 
   function openBulkBlock() {
@@ -629,10 +635,21 @@ export default function ChantierApp() {
       {/* Vue Dépenses */}
       {view === 'expenses' && (
         <main>
-          {expLoading ? (
+          {(expStatus === 'idle' || expStatus === 'loading') ? (
             <div className="empty">Chargement des dépenses…</div>
-          ) : !expLoaded ? (
-            <div className="empty">Erreur de chargement.</div>
+          ) : expStatus === 'error' ? (
+            <div className="exp-error">
+              <div className="exp-error-icon">⚠️</div>
+              <div className="exp-error-title">Impossible de charger les dépenses</div>
+              <div className="exp-error-msg">{expError}</div>
+              {expError?.includes('NOTION_EXPENSES_DATABASE_ID') && (
+                <div className="exp-error-hint">
+                  Ajoutez la variable <code>NOTION_EXPENSES_DATABASE_ID</code> dans les paramètres Vercel avec la valeur&nbsp;:
+                  <br /><code>373aea3aab0380f0a304e52452c9266d</code>
+                </div>
+              )}
+              <button className="btn-ghost" style={{ marginTop: 16 }} onClick={() => { setExpStatus('idle'); loadExpenses() }}>Réessayer</button>
+            </div>
           ) : (
             <>
               {/* Filtres */}
@@ -1259,6 +1276,12 @@ const CSS = `
   .selection-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 10px; z-index: 150; font-size: 14px; font-weight: 600; color: var(--text); box-shadow: 0 -4px 16px rgba(0,0,0,0.08); }
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 8px; font-size: 16px; z-index: 300; opacity: 0; transition: opacity 0.2s; pointer-events: none; white-space: nowrap; }
   .toast.show { opacity: 1; }
+  .exp-error { text-align: center; padding: 40px 24px; max-width: 480px; margin: 0 auto; }
+  .exp-error-icon { font-size: 32px; margin-bottom: 12px; }
+  .exp-error-title { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+  .exp-error-msg { font-size: 14px; color: var(--red); background: var(--red-dim); border-radius: var(--radius); padding: 8px 12px; word-break: break-word; margin-bottom: 12px; }
+  .exp-error-hint { font-size: 13px; color: var(--text-muted); background: var(--surface2); border-radius: var(--radius); padding: 10px 14px; text-align: left; line-height: 1.7; }
+  .exp-error-hint code { background: var(--border); border-radius: 3px; padding: 1px 5px; font-size: 12px; color: var(--text); }
   .exp-kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 4px; }
   .exp-kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; transition: border-color 0.15s; }
   .exp-kpi-card:hover { border-color: var(--accent); }
