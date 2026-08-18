@@ -93,11 +93,8 @@ export default function ChantierApp() {
   const [expFilterRembourse, setExpFilterRembourse] = useState<'tous' | 'non' | 'oui'>('tous')
   const [expSort, setExpSort] = useState<'poste' | 'piece' | 'name' | 'amount-asc' | 'amount-desc' | 'date'>('amount-desc')
 
-  // Sélection multiple (appui long) + blocage groupé
-  const [selectMode, setSelectMode] = useState(false)
-  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
-  const [bulkBlockModal, setBulkBlockModal] = useState(false)
-  const [bulkBlockIds, setBulkBlockIds] = useState<string[]>([])
+  // Blocage rapide (appui long puis tap sur une autre tâche)
+  const [blockSourceId, setBlockSourceId] = useState<string | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressTriggered = useRef(false)
 
@@ -272,38 +269,48 @@ export default function ChantierApp() {
     setEditModal(true)
   }
 
-  // ── Sélection multiple (appui long) ─────────────────────────────────────────
+  // ── Blocage rapide (appui long) ─────────────────────────────────────────────
   function startLongPress(id: string) {
     longPressTriggered.current = false
     longPressTimer.current = setTimeout(() => {
       longPressTriggered.current = true
-      setSelectMode(true)
-      setSelectedTaskIds(prev => prev.includes(id) ? prev : [...prev, id])
+      setBlockSourceId(id)
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15)
     }, 500)
   }
   function cancelLongPress() {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
   }
-  function toggleTaskSelection(id: string) {
-    setSelectedTaskIds(prev => {
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-      if (next.length === 0) setSelectMode(false)
-      return next
-    })
-  }
   function handleTaskClick(task: Task) {
     if (longPressTriggered.current) { longPressTriggered.current = false; return }
-    if (selectMode) { toggleTaskSelection(task.id); return }
+    if (blockSourceId) {
+      if (task.id === blockSourceId) { setBlockSourceId(null); return }
+      quickBlock(task)
+      return
+    }
     openEdit(task)
   }
-  function exitSelectMode() {
-    setSelectMode(false)
-    setSelectedTaskIds([])
+  function exitBlockMode() {
+    setBlockSourceId(null)
+  }
+
+  async function quickBlock(target: Task) {
+    if (!blockSourceId) return
+    const source = tasks.find(t => t.id === blockSourceId)
+    if (!source) { setBlockSourceId(null); return }
+    if ((target.blocked_by_ids || []).includes(blockSourceId)) {
+      showToast('Déjà bloquée par cette tâche')
+      return
+    }
+    const newIds = [...(target.blocked_by_ids || []), blockSourceId]
+    const { error } = await api(`/api/tasks/${target.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: newIds }) })
+    if (error) { console.error(error); showToast('⚠ Erreur lors du blocage'); return }
+    setTasks(prev => prev.map(t => t.id === target.id ? { ...t, blocked_by_ids: newIds } : t))
+    showToast(`🔒 « ${target.label} » bloquée par « ${source.label} »`)
   }
 
   function toggleView() {
-    exitSelectMode()
+    exitBlockMode()
     setOpenPicker(null)
     setView(v => {
       if (v === 'tasks') return 'purchases'
@@ -332,29 +339,6 @@ export default function ChantierApp() {
     }
   }
 
-  function openBulkBlock() {
-    setBulkBlockIds([])
-    setBulkBlockModal(true)
-  }
-
-  async function applyBulkBlock() {
-    const targets = tasks.filter(t => selectedTaskIds.includes(t.id))
-    const updates = targets.map(t => ({
-      id: t.id,
-      blocked_by_ids: [...new Set([...(t.blocked_by_ids || []), ...bulkBlockIds])].filter(id => id !== t.id),
-    }))
-    for (const u of updates) {
-      await api(`/api/tasks/${u.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: u.blocked_by_ids }) })
-    }
-    setTasks(prev => prev.map(t => {
-      const u = updates.find(x => x.id === t.id)
-      return u ? { ...t, blocked_by_ids: u.blocked_by_ids } : t
-    }))
-    setBulkBlockModal(false)
-    exitSelectMode()
-    showToast(`✓ Dépendance ajoutée à ${updates.length} tâche${updates.length > 1 ? 's' : ''}`)
-  }
-
   // ── Stats ────────────────────────────────────────────────────────────────────
   const statDone = tasks.filter(t => t.done).length
   const statTotal = tasks.length
@@ -373,11 +357,12 @@ export default function ChantierApp() {
     const blockingLabels = getBlockingLabels(task)
     const blockedPending = blockingLabels.filter(b => !b.done)
     const blockedOk = blockingLabels.filter(b => b.done)
-    const isSelected = selectedTaskIds.includes(task.id)
+    const isBlockSource = blockSourceId === task.id
+    const isBlockCandidate = !!blockSourceId && !isBlockSource
     return (
       <div
         key={key}
-        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}`}
+        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isBlockSource ? ' block-source' : ''}${isBlockCandidate ? ' block-candidate' : ''}`}
         onClick={() => handleTaskClick(task)}
         onMouseDown={() => startLongPress(task.id)}
         onMouseUp={cancelLongPress}
@@ -386,7 +371,7 @@ export default function ChantierApp() {
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
       >
-        <button className="task-check" onClick={e => { e.stopPropagation(); selectMode ? toggleTaskSelection(task.id) : toggleTask(task.id) }}>
+        <button className="task-check" onClick={e => { e.stopPropagation(); if (blockSourceId) { if (!isBlockSource) quickBlock(task) } else toggleTask(task.id) }}>
           <span className="checkmark">✓</span>
         </button>
         <div className="task-body">
@@ -417,9 +402,6 @@ export default function ChantierApp() {
   const allCatOptions = [...new Set([...getCats(addApp, addRoom), 'Mur', 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre'])]
   const addTaskOptions = tasks.filter(t => t.app === addApp && t.room === addRoom)
   const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editTask.room && t.id !== editTask.id) : []
-  const selectedTasksList = tasks.filter(t => selectedTaskIds.includes(t.id))
-  const bulkCommonRoom = selectedTasksList.length > 0 && selectedTasksList.every(t => t.room === selectedTasksList[0].room) ? selectedTasksList[0].room : null
-  const bulkBlockOptions = tasks.filter(t => t.app === currentApp && (bulkCommonRoom ? t.room === bulkCommonRoom : true) && !selectedTaskIds.includes(t.id))
 
   // ── Tri par assignation ──────────────────────────────────────────────────────
   const currentAppTasks = tasks.filter(t => t.app === currentApp).filter(filterTask)
@@ -510,9 +492,9 @@ export default function ChantierApp() {
           <div className="header-stat"><span>{statBlocked}</span> bloquées</div>
         </div>
         <div className="nav-toggle-group">
-          <button className={`nav-tab-btn${view === 'tasks' ? ' active' : ''}`} onClick={() => { exitSelectMode(); setOpenPicker(null); setView('tasks') }}>📋 Tâches</button>
-          <button className={`nav-tab-btn${view === 'purchases' ? ' active' : ''}`} onClick={() => { exitSelectMode(); setOpenPicker(null); setView('purchases') }}>🛒 Achats</button>
-          <button className={`nav-tab-btn${view === 'expenses' ? ' active' : ''}`} onClick={() => { exitSelectMode(); setOpenPicker(null); setView('expenses') }}>💶 Dépenses</button>
+          <button className={`nav-tab-btn${view === 'tasks' ? ' active' : ''}`} onClick={() => { exitBlockMode(); setOpenPicker(null); setView('tasks') }}>📋 Tâches</button>
+          <button className={`nav-tab-btn${view === 'purchases' ? ' active' : ''}`} onClick={() => { exitBlockMode(); setOpenPicker(null); setView('purchases') }}>🛒 Achats</button>
+          <button className={`nav-tab-btn${view === 'expenses' ? ' active' : ''}`} onClick={() => { exitBlockMode(); setOpenPicker(null); setView('expenses') }}>💶 Dépenses</button>
         </div>
       </header>
 
@@ -737,7 +719,7 @@ export default function ChantierApp() {
 
       {/* Main */}
       {view === 'tasks' && (
-      <main style={selectMode ? { paddingBottom: 76 } : undefined}>
+      <main style={blockSourceId ? { paddingBottom: 76 } : undefined}>
         <div className="toolbar">
           <div className="toolbar-filters">
             <button className={`filter-btn${activeFilters.length === 0 ? ' active' : ''}`} onClick={() => setActiveFilters([])}>
@@ -807,37 +789,12 @@ export default function ChantierApp() {
       </main>
       )}
 
-      {/* Barre de sélection multiple */}
-      {selectMode && (
+      {/* Barre de blocage rapide */}
+      {blockSourceId && (
         <div className="selection-bar">
-          <span>{selectedTaskIds.length} tâche{selectedTaskIds.length > 1 ? 's' : ''} sélectionnée{selectedTaskIds.length > 1 ? 's' : ''}</span>
+          <span>🔒 Bloquer par « {tasks.find(t => t.id === blockSourceId)?.label} » — touchez une tâche</span>
           <div style={{ flex: 1 }} />
-          <button className="btn-ghost" onClick={exitSelectMode}>Annuler</button>
-          <button className="btn-primary" onClick={openBulkBlock}>🔒 Bloquer par…</button>
-        </div>
-      )}
-
-      {/* Modal Blocage groupé */}
-      {bulkBlockModal && (
-        <div className="modal-overlay open" onClick={e => { if (e.target === e.currentTarget) setBulkBlockModal(false) }}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">Bloquer {selectedTaskIds.length} tâche{selectedTaskIds.length > 1 ? 's' : ''} par…</div>
-            <div className="modal-section" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
-              <MultiPicker
-                pickerId="bulk-blocked"
-                options={bulkBlockOptions.map(t => ({ id: t.id, label: t.label }))}
-                selectedIds={bulkBlockIds}
-                onToggle={id => toggleBlockedId(id, setBulkBlockIds)}
-                placeholder="Choisir une ou plusieurs tâches bloquantes"
-                openPicker={openPicker}
-                setOpenPicker={setOpenPicker}
-              />
-            </div>
-            <div className="modal-actions">
-              <button className="btn-ghost" onClick={() => setBulkBlockModal(false)}>Annuler</button>
-              <button className="btn-primary" onClick={applyBulkBlock} disabled={bulkBlockIds.length === 0}>Appliquer</button>
-            </div>
-          </div>
+          <button className="btn-ghost" onClick={exitBlockMode}>Terminé</button>
         </div>
       )}
 
@@ -1180,15 +1137,17 @@ const CSS = `
   .task.done .task-label { text-decoration: line-through; color: var(--text-muted); }
   .task.blocked { background: var(--stripe); border: 1px solid rgba(231,76,60,0.2); }
   .task.blocked .task-label { color: var(--text-muted); }
-  .task.selected { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -1px; user-select: none; }
+  .task.block-source { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -1px; user-select: none; }
+  .task.block-candidate { cursor: pointer; }
+  .task.block-candidate:hover { outline: 2px dashed var(--accent); outline-offset: -1px; }
   .task-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); background: none; cursor: pointer; flex-shrink: 0; margin-top: 2px; display: grid; place-items: center; transition: all 0.15s; }
   .task-check:hover { border-color: var(--accent); background: var(--accent-dim); }
   .task.done .task-check { background: var(--green); border-color: var(--green); }
   .task.blocked .task-check { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
-  .task.selected .task-check { background: var(--accent); border-color: var(--accent); opacity: 1; pointer-events: auto; cursor: pointer; }
+  .task.block-source .task-check { background: var(--accent); border-color: var(--accent); opacity: 1; }
   .checkmark { color: #fff; font-size: 10px; font-weight: 900; display: none; }
   .task.done .checkmark { display: block; }
-  .task.selected .checkmark { display: block; }
+  .task.block-source .checkmark { display: block; }
   .task-body { flex: 1; min-width: 0; }
   .task-label { font-size: 16px; line-height: 1.4; }
   .task-meta { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
