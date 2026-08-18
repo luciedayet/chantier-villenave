@@ -200,7 +200,18 @@ export default function ChantierApp() {
   }
 
   async function addTask() {
-    const labels = [...new Set(addLabel.split('\n').map(l => l.trim()).filter(Boolean))]
+    // Une ligne "> " ou "<" seule entre deux tâches note une dépendance entre elles :
+    // ">" = la tâche du dessus est bloquée par celle du dessous, "<" = elle la bloque.
+    const lines = addLabel.split('\n').map(l => l.trim()).filter(Boolean)
+    const labels: string[] = []
+    const deps: { beforeIdx: number; afterIdx: number; symbol: '>' | '<' }[] = []
+    for (const line of lines) {
+      if (line === '>' || line === '<') {
+        if (labels.length > 0) deps.push({ beforeIdx: labels.length - 1, afterIdx: labels.length, symbol: line })
+        continue
+      }
+      labels.push(line)
+    }
     if (labels.length === 0) return
     const base = {
       app: addApp,
@@ -214,8 +225,26 @@ export default function ChantierApp() {
     const results = await Promise.all(
       labels.map(label => api<Task>('/api/tasks', { method: 'POST', body: JSON.stringify({ ...base, label }) }))
     )
-    const created = results.filter(r => r.data).map(r => r.data as Task)
     const firstError = results.find(r => r.error)?.error
+
+    const extraBlockedBy: Record<number, string[]> = {}
+    for (const d of deps) {
+      const before = results[d.beforeIdx]?.data
+      const after = results[d.afterIdx]?.data
+      if (!before || !after) continue
+      const targetIdx = d.symbol === '>' ? d.beforeIdx : d.afterIdx
+      const blockerId = d.symbol === '>' ? after.id : before.id
+      if (!extraBlockedBy[targetIdx]) extraBlockedBy[targetIdx] = []
+      extraBlockedBy[targetIdx].push(blockerId)
+    }
+    await Promise.all(Object.entries(extraBlockedBy).map(async ([idxStr, blockerIds]) => {
+      const task = results[Number(idxStr)].data as Task
+      const newIds = [...new Set([...(task.blocked_by_ids || []), ...blockerIds])]
+      const { error } = await api(`/api/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: newIds }) })
+      if (!error) task.blocked_by_ids = newIds
+    }))
+
+    const created = results.filter(r => r.data).map(r => r.data as Task)
     if (created.length > 0) setTasks(prev => [...prev, ...created])
     if (firstError) { console.error(firstError); showToast(`⚠ ${created.length}/${labels.length} tâche(s) ajoutée(s), erreur sur le reste`) }
     if (created.length === labels.length) {
@@ -985,10 +1014,11 @@ export default function ChantierApp() {
               <textarea
                 value={addLabel}
                 onChange={e => setAddLabel(e.target.value)}
-                placeholder={'Ex : Ponçage couche 2\nRebouchage fissures\nPonçage couche 3'}
+                placeholder={'Ex : Ponçage couche 2\n>\nPonçage couche 3'}
                 rows={3}
                 autoFocus
               />
+              <div className="field-hint">Ligne avec seulement <code>&gt;</code> ou <code>&lt;</code> entre deux tâches : la tâche au-dessus est bloquée par celle du dessous (<code>&gt;</code>) ou la bloque (<code>&lt;</code>).</div>
             </div>
 
             <div className="modal-section">
@@ -1025,7 +1055,7 @@ export default function ChantierApp() {
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => setAddModal(false)}>Annuler</button>
               <button className="btn-primary" onClick={addTask}>
-                {addLabel.split('\n').map(l => l.trim()).filter(Boolean).length > 1 ? 'Ajouter les tâches' : 'Ajouter la tâche'}
+                {addLabel.split('\n').map(l => l.trim()).filter(l => l && l !== '>' && l !== '<').length > 1 ? 'Ajouter les tâches' : 'Ajouter la tâche'}
               </button>
             </div>
           </div>
@@ -1430,6 +1460,8 @@ const CSS = `
   .field textarea { resize: vertical; }
   .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
   .field select option { background: var(--surface); }
+  .field-hint { font-size: 12px; color: var(--text-dim); margin-top: 5px; line-height: 1.4; }
+  .field-hint code { background: var(--surface2); border-radius: 4px; padding: 1px 5px; font-family: inherit; }
   .editable-select-custom { display: flex; gap: 6px; }
   .editable-select-custom input { flex: 1; min-width: 0; }
   .editable-select-back { flex-shrink: 0; width: 38px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); font-size: 16px; cursor: pointer; transition: all 0.15s; }
