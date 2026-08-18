@@ -63,6 +63,8 @@ export default function ChantierApp() {
   const [addPurchases, setAddPurchases] = useState<Purchase[]>([])
 
   // Edit form
+  const [editRoom, setEditRoom] = useState('')
+  const [editCat, setEditCat] = useState('')
   const [editLabel, setEditLabel] = useState('')
   const [editBlockedIds, setEditBlockedIds] = useState<string[]>([])
   const [editAssignees, setEditAssignees] = useState<string[]>([])
@@ -218,6 +220,8 @@ export default function ChantierApp() {
     if (!editTask || !editLabel.trim()) return
     const updates = {
       label: editLabel.trim(),
+      room: editRoom.trim() || editTask.room,
+      cat: editCat.trim() || editTask.cat,
       blocked_by_ids: editBlockedIds,
       assignees: editAssignees,
       purchases: editPurchases,
@@ -262,6 +266,8 @@ export default function ChantierApp() {
 
   function openEdit(task: Task) {
     setEditTask(task)
+    setEditRoom(task.room)
+    setEditCat(task.cat)
     setEditLabel(task.label)
     setEditBlockedIds(task.blocked_by_ids || [])
     setEditAssignees(task.assignees || [])
@@ -397,11 +403,15 @@ export default function ChantierApp() {
     </div>
   )
 
+  const DEFAULT_ROOMS = ['Chambre', 'Salon', 'Cuisine', 'Salle de bain', 'Entrée', 'Couloir']
+  const DEFAULT_CATS = ['Mur', 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre']
   const rooms = getRooms(currentApp)
-  const allRoomOptions = [...new Set([...rooms, 'Chambre', 'Salon', 'Cuisine', 'Salle de bain', 'Entrée', 'Couloir'])]
-  const allCatOptions = [...new Set([...getCats(addApp, addRoom), 'Mur', 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre'])]
+  const allRoomOptions = [...new Set([...rooms, ...DEFAULT_ROOMS])]
+  const allCatOptions = [...new Set([...getCats(addApp, addRoom), ...DEFAULT_CATS])]
   const addTaskOptions = tasks.filter(t => t.app === addApp && t.room === addRoom)
-  const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editTask.room && t.id !== editTask.id) : []
+  const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editRoom && t.id !== editTask.id) : []
+  const editRoomOptions = editTask ? [...new Set([...getRooms(editTask.app), editRoom, ...DEFAULT_ROOMS])] : []
+  const editCatOptions = editTask ? [...new Set([...getCats(editTask.app, editRoom), editCat, ...DEFAULT_CATS])] : []
 
   // ── Tri par assignation ──────────────────────────────────────────────────────
   const currentAppTasks = tasks.filter(t => t.app === currentApp).filter(filterTask)
@@ -811,15 +821,21 @@ export default function ChantierApp() {
             </div>
             <div className="field">
               <label>Pièce</label>
-              <select value={addRoom} onChange={e => { setAddRoom(e.target.value); setAddCat(getCats(addApp, e.target.value)[0] || 'Autre'); setAddBlockedIds([]) }}>
-                {allRoomOptions.map(r => <option key={r}>{r}</option>)}
-              </select>
+              <EditableSelect
+                value={addRoom}
+                options={allRoomOptions}
+                placeholder="Nom de la nouvelle pièce"
+                onChange={v => { setAddRoom(v); setAddCat(getCats(addApp, v)[0] || 'Autre'); setAddBlockedIds([]) }}
+              />
             </div>
             <div className="field">
               <label>Catégorie</label>
-              <select value={addCat} onChange={e => setAddCat(e.target.value)}>
-                {allCatOptions.map(c => <option key={c}>{c}</option>)}
-              </select>
+              <EditableSelect
+                value={addCat}
+                options={allCatOptions}
+                placeholder="Nom de la nouvelle catégorie"
+                onChange={setAddCat}
+              />
             </div>
             <div className="field">
               <label>Nom de la tâche (une par ligne pour en ajouter plusieurs d'un coup)</label>
@@ -881,6 +897,24 @@ export default function ChantierApp() {
             <div className="field">
               <label>Nom de la tâche</label>
               <input type="text" value={editLabel} onChange={e => setEditLabel(e.target.value)} autoFocus />
+            </div>
+            <div className="field">
+              <label>Pièce</label>
+              <EditableSelect
+                value={editRoom}
+                options={editRoomOptions}
+                placeholder="Nom de la nouvelle pièce"
+                onChange={v => { setEditRoom(v); setEditCat(getCats(editTask.app, v)[0] || 'Autre') }}
+              />
+            </div>
+            <div className="field">
+              <label>Catégorie</label>
+              <EditableSelect
+                value={editCat}
+                options={editCatOptions}
+                placeholder="Nom de la nouvelle catégorie"
+                onChange={setEditCat}
+              />
             </div>
 
             <div className="modal-section">
@@ -1031,6 +1065,44 @@ function AssigneePicker({ pickerId, options, selected, onToggle, placeholder, op
         </div>
       )}
     </div>
+  )
+}
+
+function EditableSelect({ value, options, onChange, placeholder }: {
+  value: string
+  options: string[]
+  onChange: (v: string) => void
+  placeholder: string
+}) {
+  const NEW = '__new__'
+  const [customMode, setCustomMode] = useState(false)
+
+  if (customMode) {
+    return (
+      <div className="editable-select-custom">
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} autoFocus />
+        <button
+          type="button"
+          className="editable-select-back"
+          title="Choisir dans la liste"
+          onClick={() => { setCustomMode(false); if (!options.includes(value)) onChange(options[0] || '') }}
+        >
+          ↩
+        </button>
+      </div>
+    )
+  }
+  return (
+    <select
+      value={options.includes(value) ? value : NEW}
+      onChange={e => {
+        if (e.target.value === NEW) { setCustomMode(true); onChange('') }
+        else onChange(e.target.value)
+      }}
+    >
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+      <option value={NEW}>＋ Nouvelle…</option>
+    </select>
   )
 }
 
@@ -1217,6 +1289,10 @@ const CSS = `
   .field textarea { resize: vertical; }
   .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
   .field select option { background: var(--surface); }
+  .editable-select-custom { display: flex; gap: 6px; }
+  .editable-select-custom input { flex: 1; min-width: 0; }
+  .editable-select-back { flex-shrink: 0; width: 38px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); font-size: 16px; cursor: pointer; transition: all 0.15s; }
+  .editable-select-back:hover { border-color: var(--accent); color: var(--accent); }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; align-items: center; }
   .btn-ghost { padding: 8px 16px; background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius); font-size: 16px; cursor: pointer; transition: all 0.15s; }
   .btn-ghost:hover { border-color: var(--text-muted); color: var(--text); }
