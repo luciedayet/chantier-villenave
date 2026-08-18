@@ -97,8 +97,7 @@ export default function ChantierApp() {
 
   // Sélection multiple (appui long) + actions groupées
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
-  const [bulkBlockModal, setBulkBlockModal] = useState(false)
-  const [bulkBlockIds, setBulkBlockIds] = useState<string[]>([])
+  const [blockPickMode, setBlockPickMode] = useState<'by' | 'blocks' | null>(null)
   const [bulkEditModal, setBulkEditModal] = useState(false)
   const [bulkEditRoomOn, setBulkEditRoomOn] = useState(false)
   const [bulkEditRoom, setBulkEditRoom] = useState('')
@@ -151,8 +150,26 @@ export default function ChantierApp() {
   function getBlockingLabels(task: Task) {
     return (task.blocked_by_ids || []).map(depId => {
       const dep = tasks.find(t => t.id === depId)
-      return dep ? { label: dep.label, done: dep.done } : null
-    }).filter(Boolean) as { label: string; done: boolean }[]
+      return dep ? { id: dep.id, label: dep.label, done: dep.done } : null
+    }).filter(Boolean) as { id: string; label: string; done: boolean }[]
+  }
+
+  // Trie les tâches bloquées de sorte qu'une tâche bloquante apparaisse avant
+  // celles qu'elle bloque (au sein de la même liste), pour former une chaîne lisible.
+  function orderByBlockChain(list: Task[]) {
+    const remaining = [...list]
+    const placed = new Set<string>()
+    const result: Task[] = []
+    while (remaining.length > 0) {
+      let idx = remaining.findIndex(t =>
+        !(t.blocked_by_ids || []).some(bid => !placed.has(bid) && remaining.some(r => r.id === bid))
+      )
+      if (idx === -1) idx = 0
+      const [task] = remaining.splice(idx, 1)
+      placed.add(task.id)
+      result.push(task)
+    }
+    return result
   }
 
   function getAppTasks(app: string) { return tasks.filter(t => t.app === app) }
@@ -330,31 +347,41 @@ export default function ChantierApp() {
   }
   function handleTaskClick(task: Task) {
     if (longPressTriggered.current) { longPressTriggered.current = false; return }
+    if (blockPickMode) {
+      if (selectedTaskIds.includes(task.id)) { showToast('Choisissez une tâche en dehors de la sélection'); return }
+      applyPickedBlock(task)
+      return
+    }
     if (selectedTaskIds.length > 0) { toggleTaskSelection(task.id); return }
     openEdit(task)
   }
   function exitSelectMode() {
     setSelectedTaskIds([])
+    setBlockPickMode(null)
   }
 
-  function openBulkBlock() {
-    setBulkBlockIds([])
-    setBulkBlockModal(true)
-  }
-  async function applyBulkBlock() {
+  async function applyPickedBlock(target: Task) {
+    const mode = blockPickMode
     const targets = tasks.filter(t => selectedTaskIds.includes(t.id))
-    const updates = targets.map(t => ({
-      id: t.id,
-      blocked_by_ids: [...new Set([...(t.blocked_by_ids || []), ...bulkBlockIds])].filter(id => id !== t.id),
-    }))
-    await Promise.all(updates.map(u => api(`/api/tasks/${u.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: u.blocked_by_ids }) })))
-    setTasks(prev => prev.map(t => {
-      const u = updates.find(x => x.id === t.id)
-      return u ? { ...t, blocked_by_ids: u.blocked_by_ids } : t
-    }))
-    setBulkBlockModal(false)
+    if (!mode || targets.length === 0) { setBlockPickMode(null); return }
+    if (mode === 'by') {
+      const updates = targets.map(t => ({
+        id: t.id,
+        blocked_by_ids: [...new Set([...(t.blocked_by_ids || []), target.id])].filter(id => id !== t.id),
+      }))
+      await Promise.all(updates.map(u => api(`/api/tasks/${u.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: u.blocked_by_ids }) })))
+      setTasks(prev => prev.map(t => {
+        const u = updates.find(x => x.id === t.id)
+        return u ? { ...t, blocked_by_ids: u.blocked_by_ids } : t
+      }))
+      showToast(`🔒 ${updates.length} tâche${updates.length > 1 ? 's' : ''} bloquée${updates.length > 1 ? 's' : ''} par « ${target.label} »`)
+    } else {
+      const newIds = [...new Set([...(target.blocked_by_ids || []), ...targets.map(t => t.id)])].filter(id => id !== target.id)
+      const { error } = await api(`/api/tasks/${target.id}`, { method: 'PATCH', body: JSON.stringify({ blocked_by_ids: newIds }) })
+      if (!error) setTasks(prev => prev.map(t => t.id === target.id ? { ...t, blocked_by_ids: newIds } : t))
+      showToast(`🚧 « ${target.label} » bloquée par ${targets.length} tâche${targets.length > 1 ? 's' : ''}`)
+    }
     exitSelectMode()
-    showToast(`🔒 Dépendance ajoutée à ${updates.length} tâche${updates.length > 1 ? 's' : ''}`)
   }
 
   function openBulkEdit() {
@@ -437,16 +464,19 @@ export default function ChantierApp() {
     setter(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name])
   }
 
-  function renderTaskRow(task: Task, key: string) {
+  function renderTaskRow(task: Task, key: string, prevTask?: Task | null) {
     const blocked = isBlocked(task)
     const blockingLabels = getBlockingLabels(task)
     const blockedPending = blockingLabels.filter(b => !b.done)
     const blockedOk = blockingLabels.filter(b => b.done)
     const isSelected = selectedTaskIds.includes(task.id)
+    const isPickCandidate = !!blockPickMode && !isSelected
+    const linkedAboveId = prevTask && blockedPending.some(b => b.id === prevTask.id) ? prevTask.id : null
+    const namedBlockedPending = blockedPending.filter(b => b.id !== linkedAboveId)
     return (
       <div
         key={key}
-        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}`}
+        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}${isPickCandidate ? ' pick-candidate' : ''}${linkedAboveId ? ' linked-above' : ''}`}
         onClick={() => handleTaskClick(task)}
         onMouseDown={() => startLongPress(task.id)}
         onMouseUp={cancelLongPress}
@@ -455,13 +485,18 @@ export default function ChantierApp() {
         onTouchEnd={cancelLongPress}
         onTouchMove={cancelLongPress}
       >
-        <button className="task-check" onClick={e => { e.stopPropagation(); selectedTaskIds.length > 0 ? toggleTaskSelection(task.id) : toggleTask(task.id) }}>
+        <button className="task-check" onClick={e => {
+          e.stopPropagation()
+          if (blockPickMode) { if (!isSelected) applyPickedBlock(task); return }
+          selectedTaskIds.length > 0 ? toggleTaskSelection(task.id) : toggleTask(task.id)
+        }}>
           <span className="checkmark">✓</span>
         </button>
         <div className="task-body">
           <div className="task-label">{task.label}</div>
           <div className="task-meta">
-            {blockedPending.length > 0 && <span className="badge badge-blocked">🔒 {blockedPending.map(b => b.label).join(', ')}</span>}
+            {linkedAboveId && <span className="badge badge-link" title="Bloquée par la tâche juste au-dessus">🔗 bloquée ci-dessus</span>}
+            {namedBlockedPending.length > 0 && <span className="badge badge-blocked">🔒 {namedBlockedPending.map(b => b.label).join(', ')}</span>}
             {blockedOk.length > 0 && blockedPending.length === 0 && blockingLabels.length > 0 && <span className="badge badge-ok">✓ Dépendances OK</span>}
             {(task.assignees || []).map(a => <span key={a} className="badge badge-person">👷 {a}</span>)}
             {(task.purchases || []).length > 0 && (() => {
@@ -490,9 +525,6 @@ export default function ChantierApp() {
   const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editRoom && t.id !== editTask.id) : []
   const editRoomOptions = editTask ? [...new Set([...getRooms(editTask.app), editRoom, ...DEFAULT_ROOMS])] : []
   const editCatOptions = editTask ? [...new Set([...getCats(editTask.app, editRoom), editCat, ...DEFAULT_CATS])] : []
-  const selectedTasksList = tasks.filter(t => selectedTaskIds.includes(t.id))
-  const bulkCommonRoom = selectedTasksList.length > 0 && selectedTasksList.every(t => t.room === selectedTasksList[0].room) ? selectedTasksList[0].room : null
-  const bulkBlockOptions = tasks.filter(t => t.app === currentApp && (bulkCommonRoom ? t.room === bulkCommonRoom : true) && !selectedTaskIds.includes(t.id))
   const bulkEditRoomOptions = [...new Set([...allRoomOptions, bulkEditRoom])].filter(Boolean)
   const bulkEditCatOptions = [...new Set([...DEFAULT_CATS, bulkEditCat])].filter(Boolean)
 
@@ -864,13 +896,18 @@ export default function ChantierApp() {
                   const catTasks = tasks.filter(t => t.app === currentApp && t.room === room && t.cat === cat)
                   const filtered = catTasks.filter(filterTask)
                   if (!filtered.length && activeFilters.length > 0) return null
+                  const ordered = [
+                    ...filtered.filter(t => !t.done && !isBlocked(t)),
+                    ...orderByBlockChain(filtered.filter(t => !t.done && isBlocked(t))),
+                    ...filtered.filter(t => t.done),
+                  ]
                   return (
                     <div key={cat} className="category">
                       <div className="category-title">
                         <span className="cat-icon">{getCatIcon(cat)}</span>{cat}
                         <button className="cat-add-btn" onClick={e => { e.stopPropagation(); openAdd(room, cat) }} title={`Ajouter une tâche · ${room} / ${cat}`}>＋</button>
                       </div>
-                      {filtered.map(task => renderTaskRow(task, task.id))}
+                      {ordered.map((task, i) => renderTaskRow(task, task.id, ordered[i - 1] ?? null))}
                     </div>
                   )
                 })}
@@ -883,38 +920,24 @@ export default function ChantierApp() {
       )}
 
       {/* Barre de sélection multiple */}
-      {selectedTaskIds.length > 0 && (
+      {selectedTaskIds.length > 0 && !blockPickMode && (
         <div className="selection-bar">
           <span>{selectedTaskIds.length} tâche{selectedTaskIds.length > 1 ? 's' : ''} sélectionnée{selectedTaskIds.length > 1 ? 's' : ''}</span>
           <div style={{ flex: 1 }} />
           <button className="btn-ghost" onClick={exitSelectMode}>Annuler</button>
-          <button className="btn-ghost" onClick={openBulkEdit}>✏️ Modifier</button>
-          <button className="btn-danger" onClick={bulkDelete}>🗑 Supprimer</button>
-          <button className="btn-primary" onClick={openBulkBlock}>🔒 Bloquer par…</button>
+          <button className="btn-icon" onClick={openBulkEdit} title="Modifier">✏️</button>
+          <button className="btn-icon btn-icon-danger" onClick={bulkDelete} title="Supprimer">🗑️</button>
+          <button className="btn-icon" onClick={() => setBlockPickMode('by')} title="Bloqué par…">🔒</button>
+          <button className="btn-icon" onClick={() => setBlockPickMode('blocks')} title="Bloque…">🚧</button>
         </div>
       )}
 
-      {/* Modal Blocage groupé */}
-      {bulkBlockModal && (
-        <div className="modal-overlay open" onClick={e => { if (e.target === e.currentTarget) setBulkBlockModal(false) }}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">Bloquer {selectedTaskIds.length} tâche{selectedTaskIds.length > 1 ? 's' : ''} par…</div>
-            <div className="modal-section" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
-              <MultiPicker
-                pickerId="bulk-blocked"
-                options={bulkBlockOptions.map(t => ({ id: t.id, label: t.label }))}
-                selectedIds={bulkBlockIds}
-                onToggle={id => toggleBlockedId(id, setBulkBlockIds)}
-                placeholder="Choisir une ou plusieurs tâches bloquantes"
-                openPicker={openPicker}
-                setOpenPicker={setOpenPicker}
-              />
-            </div>
-            <div className="modal-actions">
-              <button className="btn-ghost" onClick={() => setBulkBlockModal(false)}>Annuler</button>
-              <button className="btn-primary" onClick={applyBulkBlock} disabled={bulkBlockIds.length === 0}>Appliquer</button>
-            </div>
-          </div>
+      {/* Barre de sélection de la tâche liée */}
+      {blockPickMode && (
+        <div className="selection-bar">
+          <span>{blockPickMode === 'by' ? '🔒 Touchez la tâche qui bloque' : '🚧 Touchez la tâche à bloquer'}</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-ghost" onClick={() => setBlockPickMode(null)}>Annuler</button>
         </div>
       )}
 
@@ -1383,6 +1406,8 @@ const CSS = `
   .task.blocked { background: var(--stripe); border: 1px solid rgba(231,76,60,0.2); }
   .task.blocked .task-label { color: var(--text-muted); }
   .task.selected { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -1px; user-select: none; }
+  .task.pick-candidate:hover { outline: 2px dashed var(--accent); outline-offset: -1px; }
+  .task.linked-above::before { content: ''; position: absolute; left: 19px; top: -6px; width: 2px; height: 8px; background: var(--red); opacity: 0.4; }
   .task-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); background: none; cursor: pointer; flex-shrink: 0; margin-top: 2px; display: grid; place-items: center; transition: all 0.15s; }
   .task-check:hover { border-color: var(--accent); background: var(--accent-dim); }
   .task.done .task-check { background: var(--green); border-color: var(--green); }
@@ -1396,6 +1421,7 @@ const CSS = `
   .task-meta { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
   .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
   .badge-blocked { background: var(--red-dim); color: var(--red); }
+  .badge-link { background: var(--red-dim); color: var(--red); opacity: 0.75; }
   .badge-ok { background: var(--green-dim); color: var(--green); }
   .badge-person { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(74,158,255,0.2); }
   .badge-shop { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(243,156,18,0.2); }
@@ -1473,6 +1499,10 @@ const CSS = `
   .btn-ghost:hover { border-color: var(--text-muted); color: var(--text); }
   .btn-danger { padding: 8px 14px; background: none; border: 1px solid var(--red); color: var(--red); border-radius: var(--radius); font-size: 16px; cursor: pointer; transition: all 0.15s; }
   .btn-danger:hover { background: var(--red-dim); }
+  .btn-icon { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; background: none; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); font-size: 16px; cursor: pointer; transition: all 0.15s; }
+  .btn-icon:hover { border-color: var(--accent); background: var(--accent-dim); }
+  .btn-icon-danger { border-color: var(--red); }
+  .btn-icon-danger:hover { background: var(--red-dim); }
   .modal-section { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px; }
   .modal-section-title { font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
   .empty { text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 16px; }
