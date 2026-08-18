@@ -7,7 +7,7 @@ const TEAM = ['Pierre', 'Anaïs', 'Lucie', 'Thibault', 'Armelle']
 const CAT_ICONS: Record<string, string> = {
   'Fenêtre': '🪟', 'Électricité': '⚡', 'Peinture': '🎨', 'Finitions': '✨',
   'Placage': '🧱', 'Enduit': '🪣', 'Sol': '🔲', 'Entrée': '🚪',
-  'Eau': '💧', 'Meubles': '🛋', 'Douche': '🚿', 'default': '📋',
+  'Eau': '💧', 'Meubles': '🛋', 'Douche': '🚿', 'Mur': '🧱', 'default': '📋',
 }
 function getCatIcon(cat: string) {
   for (const [k, v] of Object.entries(CAT_ICONS))
@@ -192,23 +192,29 @@ export default function ChantierApp() {
   }
 
   async function addTask() {
-    if (!addLabel.trim()) return
-    const newTask = {
+    const labels = [...new Set(addLabel.split('\n').map(l => l.trim()).filter(Boolean))]
+    if (labels.length === 0) return
+    const base = {
       app: addApp,
       room: addRoom || getRooms(addApp)[0] || 'Chambre',
       cat: addCat || 'Autre',
-      label: addLabel.trim(),
       blocked_by_ids: addBlockedIds,
       assignees: addAssignees,
       purchases: addPurchases,
       done: false,
     }
-    const { data, error } = await api<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(newTask) })
-    if (error || !data) { console.error(error); return }
-    setTasks(prev => [...prev, data])
-    setAddModal(false)
-    setCurrentApp(addApp)
-    showToast('✓ Tâche ajoutée')
+    const results = await Promise.all(
+      labels.map(label => api<Task>('/api/tasks', { method: 'POST', body: JSON.stringify({ ...base, label }) }))
+    )
+    const created = results.filter(r => r.data).map(r => r.data as Task)
+    const firstError = results.find(r => r.error)?.error
+    if (created.length > 0) setTasks(prev => [...prev, ...created])
+    if (firstError) { console.error(firstError); showToast(`⚠ ${created.length}/${labels.length} tâche(s) ajoutée(s), erreur sur le reste`) }
+    if (created.length === labels.length) {
+      setAddModal(false)
+      setCurrentApp(addApp)
+      showToast(created.length > 1 ? `✓ ${created.length} tâches ajoutées` : '✓ Tâche ajoutée')
+    }
   }
 
   async function saveEdit() {
@@ -408,7 +414,7 @@ export default function ChantierApp() {
 
   const rooms = getRooms(currentApp)
   const allRoomOptions = [...new Set([...rooms, 'Chambre', 'Salon', 'Cuisine', 'Salle de bain', 'Entrée', 'Couloir'])]
-  const allCatOptions = [...new Set([...getCats(addApp, addRoom), 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre'])]
+  const allCatOptions = [...new Set([...getCats(addApp, addRoom), 'Mur', 'Électricité', 'Peinture', 'Enduit', 'Sol', 'Eau', 'Meubles', 'Finitions', 'Douche', 'Autre'])]
   const addTaskOptions = tasks.filter(t => t.app === addApp && t.room === addRoom)
   const editTaskOptions = editTask ? tasks.filter(t => t.app === editTask.app && t.room === editTask.room && t.id !== editTask.id) : []
   const selectedTasksList = tasks.filter(t => selectedTaskIds.includes(t.id))
@@ -859,8 +865,14 @@ export default function ChantierApp() {
               </select>
             </div>
             <div className="field">
-              <label>Nom de la tâche</label>
-              <input type="text" value={addLabel} onChange={e => setAddLabel(e.target.value)} placeholder="Ex : Ponçage couche 2" autoFocus />
+              <label>Nom de la tâche (une par ligne pour en ajouter plusieurs d'un coup)</label>
+              <textarea
+                value={addLabel}
+                onChange={e => setAddLabel(e.target.value)}
+                placeholder={'Ex : Ponçage couche 2\nRebouchage fissures\nPonçage couche 3'}
+                rows={3}
+                autoFocus
+              />
             </div>
 
             <div className="modal-section">
@@ -896,7 +908,9 @@ export default function ChantierApp() {
 
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => setAddModal(false)}>Annuler</button>
-              <button className="btn-primary" onClick={addTask}>Ajouter la tâche</button>
+              <button className="btn-primary" onClick={addTask}>
+                {addLabel.split('\n').map(l => l.trim()).filter(Boolean).length > 1 ? 'Ajouter les tâches' : 'Ajouter la tâche'}
+              </button>
             </div>
           </div>
         </div>
@@ -1240,8 +1254,9 @@ const CSS = `
   .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 18px; }
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 5px; }
-  .field input, .field select { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 9px 12px; font-size: 16px; font-family: inherit; transition: border-color 0.15s; outline: none; }
-  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .field input, .field select, .field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 9px 12px; font-size: 16px; font-family: inherit; transition: border-color 0.15s; outline: none; }
+  .field textarea { resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
   .field select option { background: var(--surface); }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; align-items: center; }
   .btn-ghost { padding: 8px 16px; background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius); font-size: 16px; cursor: pointer; transition: all 0.15s; }
