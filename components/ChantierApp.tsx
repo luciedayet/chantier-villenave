@@ -476,7 +476,7 @@ export default function ChantierApp() {
     return (
       <div
         key={key}
-        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}${isPickCandidate ? ' pick-candidate' : ''}${linkedAboveId ? ' linked-above' : ''}`}
+        className={`task${task.done ? ' done' : blocked ? ' blocked' : ''}${isSelected ? ' selected' : ''}${isPickCandidate ? ' pick-candidate' : ''}`}
         onClick={() => handleTaskClick(task)}
         onMouseDown={() => startLongPress(task.id)}
         onMouseUp={cancelLongPress}
@@ -493,9 +493,8 @@ export default function ChantierApp() {
           <span className="checkmark">✓</span>
         </button>
         <div className="task-body">
-          <div className="task-label">{task.label}</div>
+          <div className={`task-label${linkedAboveId ? ' has-block-arrow' : ''}`} title={linkedAboveId ? `Bloquée par « ${prevTask?.label} »` : undefined}>{task.label}</div>
           <div className="task-meta">
-            {linkedAboveId && <span className="badge badge-link" title="Bloquée par la tâche juste au-dessus">🔗 bloquée ci-dessus</span>}
             {namedBlockedPending.length > 0 && <span className="badge badge-blocked">🔒 {namedBlockedPending.map(b => b.label).join(', ')}</span>}
             {blockedOk.length > 0 && blockedPending.length === 0 && blockingLabels.length > 0 && <span className="badge badge-ok">✓ Dépendances OK</span>}
             {(task.assignees || []).map(a => <span key={a} className="badge badge-person">👷 {a}</span>)}
@@ -1407,7 +1406,6 @@ const CSS = `
   .task.blocked .task-label { color: var(--text-muted); }
   .task.selected { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -1px; user-select: none; }
   .task.pick-candidate:hover { outline: 2px dashed var(--accent); outline-offset: -1px; }
-  .task.linked-above::before { content: ''; position: absolute; left: 19px; top: -6px; width: 2px; height: 8px; background: var(--red); opacity: 0.4; }
   .task-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); background: none; cursor: pointer; flex-shrink: 0; margin-top: 2px; display: grid; place-items: center; transition: all 0.15s; }
   .task-check:hover { border-color: var(--accent); background: var(--accent-dim); }
   .task.done .task-check { background: var(--green); border-color: var(--green); }
@@ -1417,11 +1415,12 @@ const CSS = `
   .task.done .checkmark { display: block; }
   .task.selected .checkmark { display: block; }
   .task-body { flex: 1; min-width: 0; }
-  .task-label { font-size: 16px; line-height: 1.4; }
+  .task-label { font-size: 16px; line-height: 1.4; position: relative; }
+  .task-label.has-block-arrow::before { content: ''; position: absolute; left: 0; top: -9px; width: 2px; height: 8px; background: var(--red); opacity: 0.55; }
+  .task-label.has-block-arrow::after { content: ''; position: absolute; left: -2px; top: -13px; width: 0; height: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-bottom: 5px solid var(--red); opacity: 0.55; }
   .task-meta { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
   .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
   .badge-blocked { background: var(--red-dim); color: var(--red); }
-  .badge-link { background: var(--red-dim); color: var(--red); opacity: 0.75; }
   .badge-ok { background: var(--green-dim); color: var(--green); }
   .badge-person { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(74,158,255,0.2); }
   .badge-shop { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(243,156,18,0.2); }
